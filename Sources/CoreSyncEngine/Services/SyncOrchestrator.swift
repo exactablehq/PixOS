@@ -423,8 +423,12 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
                     } else {
                         // If motion builder fails, also push companion video side-by-side
                         let companionRemoteName = companionURL.lastPathComponent
-                        try await adbClient.push(localURL: companionURL, remotePath: "\(targetDir)/\(companionRemoteName)", serial: pixel.serial)
-                        try? await adbClient.triggerMediaScan(remotePath: "\(targetDir)/\(companionRemoteName)", serial: pixel.serial)
+                        let companionRemotePath = "\(targetDir)/\(companionRemoteName)"
+                        try await adbClient.push(localURL: companionURL, remotePath: companionRemotePath, serial: pixel.serial)
+                        if let creationDate = item.creationDate {
+                            await adbClient.setRemoteTimestamp(remotePath: companionRemotePath, date: creationDate, serial: pixel.serial)
+                        }
+                        try? await adbClient.triggerMediaScan(remotePath: companionRemotePath, serial: pixel.serial)
                         try? FileManager.default.removeItem(at: companionURL)
                     }
                 }
@@ -436,6 +440,11 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
 
                 let remoteDest = "\(targetDir)/\(item.filename)"
                 try await adbClient.push(localURL: fileToPush, remotePath: remoteDest, serial: pixel.serial)
+
+                // Preserve original creation timestamp on Android filesystem so Google Photos sorts perfectly
+                if let creationDate = item.creationDate {
+                    await adbClient.setRemoteTimestamp(remotePath: remoteDest, date: creationDate, serial: pixel.serial)
+                }
 
                 // Trigger Android MediaScanner
                 try await adbClient.triggerMediaScan(remotePath: remoteDest, serial: pixel.serial)
@@ -559,5 +568,10 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
             self.recalculatePendingQueue()
         }
         return count
+    }
+
+    public func resetSyncDatabase() {
+        database.clearAll()
+        recalculatePendingQueue()
     }
 }

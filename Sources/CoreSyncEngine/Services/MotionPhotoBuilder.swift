@@ -71,6 +71,14 @@ public struct MotionPhotoBuilder: Sendable {
         }
 
         try finalData.write(to: outputURL, options: .atomic)
+
+        // Preserve original filesystem creation and modification timestamps
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: imageURL.path) {
+            var newAttrs: [FileAttributeKey: Any] = [:]
+            if let cDate = attrs[.creationDate] { newAttrs[.creationDate] = cDate }
+            if let mDate = attrs[.modificationDate] { newAttrs[.modificationDate] = mDate }
+            try? FileManager.default.setAttributes(newAttrs, ofItemAtPath: outputURL.path)
+        }
     }
 
     private static func embedXMPInJPEG(imageData: Data, xmpString: String) -> Data {

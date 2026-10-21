@@ -196,8 +196,8 @@ public final class PhotoKitSourceManager: NSObject, ObservableObject, PHPhotoLib
 
         if isLiveSubtype {
             isLive = true
-            let photoRes = resources.first(where: { $0.type == .photo || $0.type == .fullSizePhoto })
-            let videoRes = resources.first(where: { $0.type == .pairedVideo || $0.type == .fullSizePairedVideo })
+            let photoRes = resources.first(where: { $0.type == .fullSizePhoto }) ?? resources.first(where: { $0.type == .photo })
+            let videoRes = resources.first(where: { $0.type == .fullSizePairedVideo }) ?? resources.first(where: { $0.type == .pairedVideo })
 
             primaryFilename = photoRes?.originalFilename
             companionFilename = videoRes?.originalFilename
@@ -206,11 +206,11 @@ public final class PhotoKitSourceManager: NSObject, ObservableObject, PHPhotoLib
             let videoSize = (videoRes?.value(forKey: "fileSize") as? NSNumber)?.int64Value ?? 0
             totalBytes = photoSize + videoSize
         } else if asset.mediaType == .video {
-            let videoRes = resources.first(where: { $0.type == .video || $0.type == .fullSizeVideo })
+            let videoRes = resources.first(where: { $0.type == .fullSizeVideo }) ?? resources.first(where: { $0.type == .video }) ?? resources.first
             primaryFilename = videoRes?.originalFilename
             totalBytes = (videoRes?.value(forKey: "fileSize") as? NSNumber)?.int64Value ?? 0
         } else {
-            let photoRes = resources.first(where: { $0.type == .photo || $0.type == .fullSizePhoto }) ?? resources.first
+            let photoRes = resources.first(where: { $0.type == .fullSizePhoto }) ?? resources.first(where: { $0.type == .photo }) ?? resources.first
             primaryFilename = photoRes?.originalFilename
             totalBytes = (photoRes?.value(forKey: "fileSize") as? NSNumber)?.int64Value ?? 0
         }
@@ -263,6 +263,7 @@ public final class PhotoKitSourceManager: NSObject, ObservableObject, PHPhotoLib
 
     /// Downloads the asset directly from iCloud / Photo Library to the local staging folder.
     /// If the item is in iCloud, `isNetworkAccessAllowed = true` triggers Apple's background iCloud streaming download.
+    /// Prioritizes current adjusted/edited media if present, falling back to original camera capture.
     public func downloadAsset(
         id: String,
         to stagingDir: URL,
@@ -287,23 +288,23 @@ public final class PhotoKitSourceManager: NSObject, ObservableObject, PHPhotoLib
             onProgress?(progress)
         }
 
-        // Determine primary and companion resources
+        // Determine primary and companion resources (prefer fullSize edited version if user made edits)
         let primaryResource: PHAssetResource
         var companionResource: PHAssetResource? = nil
 
         if isLive {
-            guard let photo = resources.first(where: { $0.type == .photo || $0.type == .fullSizePhoto }) else {
+            guard let photo = resources.first(where: { $0.type == .fullSizePhoto }) ?? resources.first(where: { $0.type == .photo }) else {
                 throw PhotoKitError.resourceNotFound
             }
             primaryResource = photo
-            companionResource = resources.first(where: { $0.type == .pairedVideo || $0.type == .fullSizePairedVideo })
+            companionResource = resources.first(where: { $0.type == .fullSizePairedVideo }) ?? resources.first(where: { $0.type == .pairedVideo })
         } else if asset.mediaType == .video {
-            guard let video = resources.first(where: { $0.type == .video || $0.type == .fullSizeVideo }) ?? resources.first else {
+            guard let video = resources.first(where: { $0.type == .fullSizeVideo }) ?? resources.first(where: { $0.type == .video }) ?? resources.first else {
                 throw PhotoKitError.resourceNotFound
             }
             primaryResource = video
         } else {
-            guard let photo = resources.first(where: { $0.type == .photo || $0.type == .fullSizePhoto }) ?? resources.first else {
+            guard let photo = resources.first(where: { $0.type == .fullSizePhoto }) ?? resources.first(where: { $0.type == .photo }) ?? resources.first else {
                 throw PhotoKitError.resourceNotFound
             }
             primaryResource = photo
@@ -324,6 +325,13 @@ public final class PhotoKitSourceManager: NSObject, ObservableObject, PHPhotoLib
             }
         }
 
+        // Preserve original filesystem creation and modification dates on the staged file
+        if let creationDate = asset.creationDate {
+            var attrs: [FileAttributeKey: Any] = [.creationDate: creationDate]
+            attrs[.modificationDate] = asset.modificationDate ?? creationDate
+            try? FileManager.default.setAttributes(attrs, ofItemAtPath: primaryDestURL.path)
+        }
+
         var companionDestURL: URL? = nil
         if let comp = companionResource {
             let compFilename = comp.originalFilename
@@ -342,6 +350,13 @@ public final class PhotoKitSourceManager: NSObject, ObservableObject, PHPhotoLib
                     }
                 }
             }
+
+            if let creationDate = asset.creationDate {
+                var attrs: [FileAttributeKey: Any] = [.creationDate: creationDate]
+                attrs[.modificationDate] = asset.modificationDate ?? creationDate
+                try? FileManager.default.setAttributes(attrs, ofItemAtPath: compURL.path)
+            }
+
             companionDestURL = compURL
         }
 

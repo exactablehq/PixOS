@@ -215,6 +215,20 @@ public final class ADBClient: Sendable {
         _ = try? await run(arguments: args)
     }
 
+    public func setRemoteTimestamp(remotePath: String, date: Date, serial: String? = nil) async {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyyMMddHHmm.ss"
+        let timestampStr = formatter.string(from: date)
+
+        var args = ["shell", "touch", "-t", timestampStr, "\"\(remotePath)\""]
+        if let serial = serial {
+            args = ["-s", serial] + args
+        }
+        _ = try? await run(arguments: args)
+    }
+
     public func connectWireless(ip: String, port: Int = 5555) async throws -> Bool {
         let (stdout, stderr, exitCode) = try await run(arguments: ["connect", "\(ip):\(port)"])
         guard exitCode == 0 else {

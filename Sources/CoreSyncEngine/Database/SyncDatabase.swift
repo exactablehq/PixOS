@@ -169,4 +169,11 @@ public final class SyncDatabase: @unchecked Sendable {
         }
         return (0, 0, nil)
     }
+
+    public func clearAll() {
+        lock.lock()
+        defer { lock.unlock() }
+        let clearSQL = "DELETE FROM synced_media; VACUUM;"
+        sqlite3_exec(db, clearSQL, nil, nil, nil)
+    }
 }
