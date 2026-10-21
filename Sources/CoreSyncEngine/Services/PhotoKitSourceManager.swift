@@ -283,22 +283,52 @@ public final class PhotoKitSourceManager: NSObject, ObservableObject, PHPhotoLib
         )
     }
 
+    final class ActivityTracker: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _lastActivity: Date = Date()
+
+        var lastActivity: Date {
+            lock.lock()
+            defer { lock.unlock() }
+            return _lastActivity
+        }
+
+        func recordActivity() {
+            lock.lock()
+            _lastActivity = Date()
+            lock.unlock()
+        }
+    }
+
     /// Downloads the asset directly from iCloud / Photo Library to the local staging folder.
     /// If the item is in iCloud, `isNetworkAccessAllowed = true` triggers Apple's background iCloud streaming download.
     /// Prioritizes current adjusted/edited media if present, falling back to original camera capture.
     public func downloadAsset(
         id: String,
         to stagingDir: URL,
-        timeout: TimeInterval = 60.0,
+        timeout: TimeInterval = 120.0,
         onProgress: ((Double) -> Void)? = nil
     ) async throws -> (primaryURL: URL, companionVideoURL: URL?) {
-        try await withThrowingTaskGroup(of: (URL, URL?).self) { group in
+        let tracker = ActivityTracker()
+
+        return try await withThrowingTaskGroup(of: (URL, URL?).self) { group in
             group.addTask {
-                try await self.performDownload(id: id, to: stagingDir, onProgress: onProgress)
+                try await self.performDownload(id: id, to: stagingDir) { progress in
+                    tracker.recordActivity()
+                    onProgress?(progress)
+                }
             }
+
+            // Stall Watchdog: Only times out if zero bytes / progress have arrived for `timeout` seconds
             group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                throw PhotoKitError.downloadTimedOut
+                while !Task.isCancelled {
+                    try await Task.sleep(nanoseconds: 2_000_000_000) // check every 2 seconds
+                    let idle = Date().timeIntervalSince(tracker.lastActivity)
+                    if idle >= timeout {
+                        throw PhotoKitError.downloadTimedOut
+                    }
+                }
+                throw CancellationError()
             }
 
             guard let firstCompleted = try await group.next() else {
@@ -313,7 +343,7 @@ public final class PhotoKitSourceManager: NSObject, ObservableObject, PHPhotoLib
     public func downloadAssetWithRetry(
         id: String,
         to stagingDir: URL,
-        timeout: TimeInterval = 60.0,
+        timeout: TimeInterval = 120.0,
         maxRetries: Int = 3,
         onProgress: ((Double) -> Void)? = nil
     ) async throws -> (primaryURL: URL, companionVideoURL: URL?) {
@@ -356,41 +386,74 @@ public final class PhotoKitSourceManager: NSObject, ObservableObject, PHPhotoLib
             onProgress?(progress)
         }
 
-        // Determine primary and companion resources (prefer fullSize edited version if user made edits)
-        let primaryResource: PHAssetResource
-        var companionResource: PHAssetResource? = nil
+        // Create an isolated subfolder per download to prevent multi-stream filename collisions
+        let cleanId = id.prefix(12).replacingOccurrences(of: "/", with: "_")
+        let isolatedDir = stagingDir.appendingPathComponent("asset_\(cleanId)_\(UUID().uuidString.prefix(6))")
+        try FileManager.default.createDirectory(at: isolatedDir, withIntermediateDirectories: true)
 
+        // Determine candidate resources for primary file with graceful fallback
+        var primaryCandidates: [PHAssetResource] = []
         if isLive {
-            guard let photo = resources.first(where: { $0.type == .fullSizePhoto }) ?? resources.first(where: { $0.type == .photo }) else {
-                throw PhotoKitError.resourceNotFound
+            if let edited = resources.first(where: { $0.type == .fullSizePhoto }) {
+                primaryCandidates.append(edited)
             }
-            primaryResource = photo
-            companionResource = resources.first(where: { $0.type == .fullSizePairedVideo }) ?? resources.first(where: { $0.type == .pairedVideo })
+            if let original = resources.first(where: { $0.type == .photo }) {
+                primaryCandidates.append(original)
+            }
         } else if asset.mediaType == .video {
-            guard let video = resources.first(where: { $0.type == .fullSizeVideo }) ?? resources.first(where: { $0.type == .video }) ?? resources.first else {
-                throw PhotoKitError.resourceNotFound
+            if let edited = resources.first(where: { $0.type == .fullSizeVideo }) {
+                primaryCandidates.append(edited)
             }
-            primaryResource = video
+            if let original = resources.first(where: { $0.type == .video }) {
+                primaryCandidates.append(original)
+            }
         } else {
-            guard let photo = resources.first(where: { $0.type == .fullSizePhoto }) ?? resources.first(where: { $0.type == .photo }) ?? resources.first else {
-                throw PhotoKitError.resourceNotFound
+            if let edited = resources.first(where: { $0.type == .fullSizePhoto }) {
+                primaryCandidates.append(edited)
             }
-            primaryResource = photo
+            if let original = resources.first(where: { $0.type == .photo }) {
+                primaryCandidates.append(original)
+            }
         }
 
-        let primaryFilename = primaryResource.originalFilename
-        let primaryDestURL = stagingDir.appendingPathComponent(primaryFilename)
-        try? FileManager.default.removeItem(at: primaryDestURL)
-
-        // Write primary file (streams from iCloud if needed)
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            resourceManager.writeData(for: primaryResource, toFile: primaryDestURL, options: options) { error in
-                if let error = error {
-                    continuation.resume(throwing: PhotoKitError.writeFailed(error.localizedDescription))
-                } else {
-                    continuation.resume()
-                }
+        if primaryCandidates.isEmpty {
+            if let anyRes = resources.first {
+                primaryCandidates.append(anyRes)
+            } else {
+                throw PhotoKitError.resourceNotFound
             }
+        }
+
+        var downloadedPrimaryURL: URL?
+        var lastWriteError: Error?
+
+        for candidate in primaryCandidates {
+            let candidateFilename = candidate.originalFilename
+            let destURL = isolatedDir.appendingPathComponent(candidateFilename)
+            try? FileManager.default.removeItem(at: destURL)
+
+            do {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    resourceManager.writeData(for: candidate, toFile: destURL, options: options) { error in
+                        if let error = error {
+                            continuation.resume(throwing: PhotoKitError.writeFailed(error.localizedDescription))
+                        } else {
+                            continuation.resume()
+                        }
+                    }
+                }
+                downloadedPrimaryURL = destURL
+                lastWriteError = nil
+                break
+            } catch {
+                lastWriteError = error
+                try? FileManager.default.removeItem(at: destURL)
+            }
+        }
+
+        guard let primaryDestURL = downloadedPrimaryURL else {
+            try? FileManager.default.removeItem(at: isolatedDir)
+            throw lastWriteError ?? PhotoKitError.writeFailed("All resource candidates failed to download from iCloud")
         }
 
         // Preserve original filesystem creation and modification dates on the staged file
@@ -400,32 +463,51 @@ public final class PhotoKitSourceManager: NSObject, ObservableObject, PHPhotoLib
             try? FileManager.default.setAttributes(attrs, ofItemAtPath: primaryDestURL.path)
         }
 
+        // Handle companion live photo video with fallback
         var companionDestURL: URL? = nil
-        if let comp = companionResource {
-            let compFilename = comp.originalFilename
-            let compURL = stagingDir.appendingPathComponent(compFilename)
-            try? FileManager.default.removeItem(at: compURL)
+        if isLive {
+            var companionCandidates: [PHAssetResource] = []
+            if let editedComp = resources.first(where: { $0.type == .fullSizePairedVideo }) {
+                companionCandidates.append(editedComp)
+            }
+            if let origComp = resources.first(where: { $0.type == .pairedVideo }) {
+                companionCandidates.append(origComp)
+            }
 
-            let compOptions = PHAssetResourceRequestOptions()
-            compOptions.isNetworkAccessAllowed = true
+            for compRes in companionCandidates {
+                let compFilename = compRes.originalFilename
+                let compURL = isolatedDir.appendingPathComponent(compFilename)
+                try? FileManager.default.removeItem(at: compURL)
 
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                resourceManager.writeData(for: comp, toFile: compURL, options: compOptions) { error in
-                    if let error = error {
-                        continuation.resume(throwing: PhotoKitError.writeFailed(error.localizedDescription))
-                    } else {
-                        continuation.resume()
+                let compOptions = PHAssetResourceRequestOptions()
+                compOptions.isNetworkAccessAllowed = true
+                compOptions.progressHandler = { progress in
+                    onProgress?(progress)
+                }
+
+                do {
+                    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                        resourceManager.writeData(for: compRes, toFile: compURL, options: compOptions) { error in
+                            if let error = error {
+                                continuation.resume(throwing: PhotoKitError.writeFailed(error.localizedDescription))
+                            } else {
+                                continuation.resume()
+                            }
+                        }
                     }
+
+                    if let creationDate = asset.creationDate {
+                        var attrs: [FileAttributeKey: Any] = [.creationDate: creationDate]
+                        attrs[.modificationDate] = asset.modificationDate ?? creationDate
+                        try? FileManager.default.setAttributes(attrs, ofItemAtPath: compURL.path)
+                    }
+
+                    companionDestURL = compURL
+                    break
+                } catch {
+                    try? FileManager.default.removeItem(at: compURL)
                 }
             }
-
-            if let creationDate = asset.creationDate {
-                var attrs: [FileAttributeKey: Any] = [.creationDate: creationDate]
-                attrs[.modificationDate] = asset.modificationDate ?? creationDate
-                try? FileManager.default.setAttributes(attrs, ofItemAtPath: compURL.path)
-            }
-
-            companionDestURL = compURL
         }
 
         return (primaryDestURL, companionDestURL)

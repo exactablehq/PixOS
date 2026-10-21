@@ -5,8 +5,10 @@ public final class DashboardViewModel: ObservableObject {
     @Published public var showingOnboarding: Bool = false
     @Published public var showingWirelessModal: Bool = false
     @Published public var showingSwipeClean: Bool = false
+    @Published public var showingSkippedModal: Bool = false
     @Published public var showingDeleteConfirmation: Bool = false
     @Published public var selectedFilter: String = "All"
+    @Published public var copiedNotice: Bool = false
     @Published public var pairingVM: PairingViewModel = PairingViewModel()
     @Published public var swipeCleanVM: SwipeCleanViewModel = SwipeCleanViewModel()
     @Published public var onboardingVM: OnboardingViewModel = OnboardingViewModel()
@@ -103,6 +105,18 @@ public struct MainDashboardView: View {
                     .onTapGesture { vm.showingSwipeClean = false }
 
                 ICloudSwipeCleanView(orchestrator: orchestrator, vm: vm.swipeCleanVM, onDismiss: { vm.showingSwipeClean = false })
+                    .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
+                    .cornerRadius(16)
+                    .shadow(radius: 20)
+                    .transition(.scale.combined(with: .opacity))
+            }
+
+            if vm.showingSkippedModal {
+                Color.black.opacity(0.4)
+                    .ignoresSafeArea()
+                    .onTapGesture { vm.showingSkippedModal = false }
+
+                SkippedItemsModalView(orchestrator: orchestrator, vm: vm, onDismiss: { vm.showingSkippedModal = false })
                     .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
                     .cornerRadius(16)
                     .shadow(radius: 20)
@@ -690,18 +704,45 @@ public struct MainDashboardView: View {
 
             // Concurrency Streams
             VStack(alignment: .leading, spacing: 6) {
-                Text("iCloud Streams")
-                    .font(.caption.bold())
-                    .foregroundColor(.secondary)
-
-                Picker("Streams", selection: $orchestrator.config.concurrentStreams) {
-                    Text("1x (Sequential)").tag(1)
-                    Text("2x").tag(2)
-                    Text("4x (Balanced)").tag(4)
-                    Text("6x (Fast)").tag(6)
-                    Text("8x (Max Speed)").tag(8)
+                HStack(spacing: 4) {
+                    Text("iCloud Streams")
+                        .font(.caption.bold())
+                        .foregroundColor(.secondary)
+                    Text("(\(orchestrator.config.concurrentStreams)x)")
+                        .font(.caption2.bold())
+                        .foregroundColor(.blue)
                 }
-                .pickerStyle(.menu)
+
+                HStack(spacing: 6) {
+                    Picker("Preset", selection: Binding(
+                        get: {
+                            [1, 2, 4, 8, 16, 32, 64, 128].contains(orchestrator.config.concurrentStreams)
+                                ? orchestrator.config.concurrentStreams
+                                : -1
+                        },
+                        set: { val in
+                            if val > 0 {
+                                orchestrator.config.concurrentStreams = val
+                            }
+                        }
+                    )) {
+                        Text("1x").tag(1)
+                        Text("2x").tag(2)
+                        Text("4x (Default)").tag(4)
+                        Text("8x (Fast)").tag(8)
+                        Text("16x (Turbo)").tag(16)
+                        Text("32x (Ultra)").tag(32)
+                        Text("64x (Extreme)").tag(64)
+                        Text("128x (Max)").tag(128)
+                        Text("Custom...").tag(-1)
+                    }
+                    .pickerStyle(.menu)
+
+                    TextField("Custom", value: $orchestrator.config.concurrentStreams, format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 58)
+                        .help("Enter any custom number of parallel streams (e.g. 50, 100, 1000)")
+                }
             }
 
             Divider()
@@ -931,21 +972,31 @@ public struct MainDashboardView: View {
                 }
             }
 
-            if !orchestrator.skippedFailedItems.isEmpty && orchestrator.state != .syncing {
+            let skippedCount = max(orchestrator.skippedItems.count, orchestrator.skippedFailedItems.count)
+            if skippedCount > 0 && orchestrator.state != .syncing {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundColor(.orange)
-                    Text("\(orchestrator.skippedFailedItems.count) items skipped due to network/timeout.")
-                        .font(.caption)
+                    Text("\(skippedCount) items skipped due to network/timeout.")
+                        .font(.caption.bold())
                     Spacer()
-                    Button("Retry Skipped Items") {
-                        orchestrator.retryFailedItems()
+                    Toggle("Auto-retry on finish", isOn: $orchestrator.autoRetrySkippedAtEnd)
+                        .toggleStyle(.checkbox)
+                        .font(.caption2)
+                    Button("View Details") {
+                        vm.showingSkippedModal = true
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    Button("Retry All (\(skippedCount))") {
+                        orchestrator.retryFailedItems()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.orange)
+                    .controlSize(.small)
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 6)
+                .padding(.vertical, 8)
                 .background(Color.orange.opacity(0.12))
                 .cornerRadius(8)
             }
@@ -1006,5 +1057,153 @@ public struct MainDashboardView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Skipped Items Modal
+
+public struct SkippedItemsModalView: View {
+    @ObservedObject var orchestrator: SyncOrchestrator
+    @ObservedObject var vm: DashboardViewModel
+    var onDismiss: () -> Void
+
+    public var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                        let count = max(orchestrator.skippedItems.count, orchestrator.skippedFailedItems.count)
+                        Text("Skipped Media Items (\(count))")
+                            .font(.headline.bold())
+                    }
+                    Text("These photos/videos encountered iCloud network stalls or CloudKit timeouts.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(18)
+
+            Divider()
+
+            // List of Skipped Items
+            if orchestrator.skippedItems.isEmpty && orchestrator.skippedFailedItems.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 40))
+                        .foregroundColor(.green)
+                    Text("No Skipped Items")
+                        .font(.headline)
+                    Text("All items were transferred or no skipped items remain.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding()
+            } else {
+                ScrollView {
+                    VStack(spacing: 8) {
+                        if !orchestrator.skippedItems.isEmpty {
+                            ForEach(orchestrator.skippedItems) { item in
+                                HStack(spacing: 12) {
+                                    Image(systemName: item.item.isVideo ? "video.fill" : (item.item.isLivePhoto ? "livephoto" : "photo.fill"))
+                                        .foregroundColor(item.item.isVideo ? .purple : .blue)
+                                        .font(.title3)
+
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(item.item.filename)
+                                            .font(.subheadline.bold())
+                                        Text(item.reason)
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
+                                            .lineLimit(2)
+                                    }
+
+                                    Spacer()
+
+                                    Text(item.item.formattedSize)
+                                        .font(.caption.monospaced())
+                                        .foregroundColor(.secondary)
+                                }
+                                .padding(10)
+                                .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                                .cornerRadius(8)
+                            }
+                        } else {
+                            ForEach(orchestrator.skippedFailedItems) { item in
+                                HStack(spacing: 12) {
+                                    Image(systemName: item.isVideo ? "video.fill" : (item.isLivePhoto ? "livephoto" : "photo.fill"))
+                                        .foregroundColor(item.isVideo ? .purple : .blue)
+                                        .font(.title3)
+
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(item.filename)
+                                            .font(.subheadline.bold())
+                                        Text("iCloud streaming stall or timeout")
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
+                                    }
+
+                                    Spacer()
+
+                                    Text(item.formattedSize)
+                                        .font(.caption.monospaced())
+                                        .foregroundColor(.secondary)
+                                }
+                                .padding(10)
+                                .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                                .cornerRadius(8)
+                            }
+                        }
+                    }
+                    .padding(16)
+                }
+                .frame(maxHeight: 300)
+            }
+
+            Divider()
+
+            // Footer Actions
+            HStack {
+                Toggle("Auto-retry on batch completion", isOn: $orchestrator.autoRetrySkippedAtEnd)
+                    .font(.caption)
+
+                Spacer()
+
+                Button(vm.copiedNotice ? "Copied!" : "Copy Report") {
+                    let report = orchestrator.exportSkippedReport()
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(report, forType: .string)
+                    vm.copiedNotice = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        vm.copiedNotice = false
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                let count = max(orchestrator.skippedItems.count, orchestrator.skippedFailedItems.count)
+                Button("Retry All (\(count))") {
+                    orchestrator.retryFailedItems()
+                    onDismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.blue)
+                .controlSize(.small)
+                .disabled(count == 0)
+            }
+            .padding(16)
+            .background(Color(NSColor.windowBackgroundColor).opacity(0.4))
+        }
+        .frame(width: 580)
     }
 }

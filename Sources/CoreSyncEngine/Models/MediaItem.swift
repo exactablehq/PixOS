@@ -77,6 +77,10 @@ public struct MediaItem: Identifiable, Sendable, Equatable {
     public var formattedSize: String {
         ByteCountFormatter.string(fromByteCount: fileSize, countStyle: .file)
     }
+
+    public var isVideo: Bool {
+        mediaType == .video || mediaType == .screenRecording
+    }
 }
 
 public struct AndroidDevice: Identifiable, Sendable, Equatable {
@@ -158,7 +162,21 @@ public struct SyncConfiguration: Sendable, Equatable {
         self.targetPixelPath = targetPixelPath
         self.customADBPath = customADBPath
         self.safeFreeStorageThresholdBytes = safeFreeStorageThresholdBytes
-        self.concurrentStreams = max(1, min(8, concurrentStreams))
+        self.concurrentStreams = max(1, concurrentStreams)
+    }
+}
+
+public struct SkippedItem: Identifiable, Sendable, Equatable {
+    public let id: String
+    public let item: MediaItem
+    public let reason: String
+    public let timestamp: Date
+
+    public init(id: String, item: MediaItem, reason: String, timestamp: Date = Date()) {
+        self.id = id
+        self.item = item
+        self.reason = reason
+        self.timestamp = timestamp
     }
 }
 

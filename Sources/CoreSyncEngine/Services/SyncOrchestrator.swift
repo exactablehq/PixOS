@@ -36,6 +36,8 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
     @Published public var lastErrorMessage: String? = nil
     @Published public var isCatalogComplete: Bool = false
     @Published public var skippedFailedItems: [MediaItem] = []
+    @Published public var skippedItems: [SkippedItem] = []
+    @Published public var autoRetrySkippedAtEnd: Bool = true
 
     public var connectedIPhone: ConnectedIPhone? {
         if let id = selectedIPhoneId {
@@ -327,16 +329,17 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
         var overallTransferredBytes: Int64 = 0
         var itemCounter = 0
         var recentTransfers: [(date: Date, bytes: Int64)] = []
-        let concurrency = max(1, min(8, config.concurrentStreams))
+        let concurrency = max(1, config.concurrentStreams)
         var prefetchTasks: [String: Task<(primaryURL: URL, companionVideoURL: URL?), Error>] = [:]
 
         func spawnPrefetch(for itm: MediaItem) {
             guard selectedSourceType == .icloudPhotos else { return }
             let id = itm.id
             guard prefetchTasks[id] == nil else { return }
+            let timeout: TimeInterval = itm.isVideo ? 300.0 : 120.0
             prefetchTasks[id] = Task.detached(priority: .userInitiated) { [weak self] in
                 guard let self = self else { throw PhotoKitError.resourceNotFound }
-                return try await self.photoKitManager.downloadAssetWithRetry(id: id, to: stagingDir, timeout: 60.0, maxRetries: 3)
+                return try await self.photoKitManager.downloadAssetWithRetry(id: id, to: stagingDir, timeout: timeout, maxRetries: 3)
             }
         }
 
@@ -414,9 +417,10 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
                     var isMotionPhoto = false
 
                     if selectedSourceType == .icloudPhotos {
+                        let timeout: TimeInterval = item.isVideo ? 300.0 : 120.0
                         let task = prefetchTasks.removeValue(forKey: item.id) ?? Task.detached(priority: .userInitiated) { [weak self] in
                             guard let self = self else { throw PhotoKitError.resourceNotFound }
-                            return try await self.photoKitManager.downloadAssetWithRetry(id: item.id, to: stagingDir, timeout: 60.0, maxRetries: 3)
+                            return try await self.photoKitManager.downloadAssetWithRetry(id: item.id, to: stagingDir, timeout: timeout, maxRetries: 3)
                         }
 
                         let res = try await task.value
@@ -486,12 +490,17 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
                     )
 
                     // Clean up Mac staging copy immediately to keep disk footprint minimal
-                    try? FileManager.default.removeItem(at: stagedPrimaryURL)
-                    if fileToPush != stagedPrimaryURL {
-                        try? FileManager.default.removeItem(at: fileToPush)
-                    }
-                    if let companion = stagedVideoURL {
-                        try? FileManager.default.removeItem(at: companion)
+                    let isolatedFolder = stagedPrimaryURL.deletingLastPathComponent()
+                    if isolatedFolder != stagingDir && isolatedFolder.lastPathComponent.hasPrefix("asset_") {
+                        try? FileManager.default.removeItem(at: isolatedFolder)
+                    } else {
+                        try? FileManager.default.removeItem(at: stagedPrimaryURL)
+                        if fileToPush != stagedPrimaryURL {
+                            try? FileManager.default.removeItem(at: fileToPush)
+                        }
+                        if let companion = stagedVideoURL {
+                            try? FileManager.default.removeItem(at: companion)
+                        }
                     }
 
                     overallTransferredBytes += item.fileSize
@@ -520,16 +529,117 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
                         }
                     }
                 } catch {
-                    // Item error isolation: record to skippedFailedItems, clean staging, and continue seamlessly
+                    // Item error isolation: record to skippedItems, clean staging, and continue seamlessly
                     print("⚠️ Skipped item \(item.filename) due to error: \(error.localizedDescription)")
                     let failedItem = item
+                    let reason = error.localizedDescription
                     await MainActor.run {
+                        let skipped = SkippedItem(id: failedItem.id, item: failedItem, reason: reason)
+                        self.skippedItems.append(skipped)
                         self.skippedFailedItems.append(failedItem)
-                        self.lastErrorMessage = "Skipped \(failedItem.filename): \(error.localizedDescription)"
+                        self.lastErrorMessage = "Skipped \(failedItem.filename): \(reason)"
                     }
-                    let p = stagingDir.appendingPathComponent(item.filename)
-                    try? FileManager.default.removeItem(at: p)
+                    let cleanId = item.id.prefix(12).replacingOccurrences(of: "/", with: "_")
+                    if let subdirs = try? FileManager.default.contentsOfDirectory(at: stagingDir, includingPropertiesForKeys: nil) {
+                        for sub in subdirs where sub.lastPathComponent.contains(cleanId) {
+                            try? FileManager.default.removeItem(at: sub)
+                        }
+                    }
                     continue
+                }
+            }
+        }
+
+        // Auto-retry pass for skipped items if enabled and sync was not cancelled
+        if autoRetrySkippedAtEnd && !skippedItems.isEmpty && !isCancelled {
+            let retryItems = skippedItems.map { $0.item }
+            await MainActor.run {
+                self.progress.statusDescription = "Auto-retrying \(retryItems.count) skipped items..."
+                self.skippedItems.removeAll()
+                self.skippedFailedItems.removeAll()
+            }
+
+            for item in retryItems {
+                if isCancelled { break }
+                do {
+                    var stagedPrimaryURL: URL
+                    var stagedVideoURL: URL? = nil
+                    var isMotionPhoto = false
+
+                    if selectedSourceType == .icloudPhotos {
+                        let timeout: TimeInterval = item.isVideo ? 300.0 : 120.0
+                        let res = try await self.photoKitManager.downloadAssetWithRetry(id: item.id, to: stagingDir, timeout: timeout, maxRetries: 3)
+                        stagedPrimaryURL = res.primaryURL
+                        stagedVideoURL = res.companionVideoURL
+                    } else {
+                        stagedPrimaryURL = try await imageCaptureManager.downloadFile(named: item.filename, to: stagingDir)
+                        if item.isLivePhoto && config.combineLivePhotos, let companionName = item.companionVideoName {
+                            stagedVideoURL = try? await imageCaptureManager.downloadFile(named: companionName, to: stagingDir)
+                        }
+                    }
+
+                    var fileToPush = stagedPrimaryURL
+                    if item.isLivePhoto && config.combineLivePhotos, let companionURL = stagedVideoURL {
+                        let motionURL = stagingDir.appendingPathComponent("MOTION_\(item.filename)")
+                        if (try? MotionPhotoBuilder.buildMotionPhoto(imageURL: stagedPrimaryURL, videoURL: companionURL, outputURL: motionURL)) != nil {
+                            fileToPush = motionURL
+                            isMotionPhoto = true
+                            try? FileManager.default.removeItem(at: companionURL)
+                        } else {
+                            let companionRemoteName = companionURL.lastPathComponent
+                            let companionRemotePath = "\(targetDir)/\(companionRemoteName)"
+                            try await adbClient.push(localURL: companionURL, remotePath: companionRemotePath, serial: pixel.serial)
+                            if let creationDate = item.creationDate {
+                                await adbClient.setRemoteTimestamp(remotePath: companionRemotePath, date: creationDate, serial: pixel.serial)
+                            }
+                            Task.detached { [adb = self.adbClient, serial = pixel.serial] in
+                                try? await adb.triggerMediaScan(remotePath: companionRemotePath, serial: serial)
+                            }
+                            try? FileManager.default.removeItem(at: companionURL)
+                        }
+                    }
+
+                    let remoteDest = "\(targetDir)/\(item.filename)"
+                    try await adbClient.push(localURL: fileToPush, remotePath: remoteDest, serial: pixel.serial)
+                    if let creationDate = item.creationDate {
+                        await adbClient.setRemoteTimestamp(remotePath: remoteDest, date: creationDate, serial: pixel.serial)
+                    }
+                    Task.detached { [adb = self.adbClient, serial = pixel.serial] in
+                        try? await adb.triggerMediaScan(remotePath: remoteDest, serial: serial)
+                    }
+
+                    database.recordSynced(
+                        fingerprint: item.fingerprint,
+                        filename: item.filename,
+                        fileSize: item.fileSize,
+                        mediaType: item.mediaType.rawValue,
+                        creationDate: item.creationDate,
+                        pixelPath: remoteDest,
+                        isMotionPhoto: isMotionPhoto
+                    )
+
+                    let isolatedFolder = stagedPrimaryURL.deletingLastPathComponent()
+                    if isolatedFolder != stagingDir && isolatedFolder.lastPathComponent.hasPrefix("asset_") {
+                        try? FileManager.default.removeItem(at: isolatedFolder)
+                    } else {
+                        try? FileManager.default.removeItem(at: stagedPrimaryURL)
+                    }
+
+                    let currentItem = item
+                    await MainActor.run {
+                        self.syncedInSession.append(currentItem)
+                        if !self.triageQueue.contains(where: { $0.id == currentItem.id }) {
+                            self.triageQueue.append(currentItem)
+                        }
+                    }
+                } catch {
+                    let failedItem = item
+                    let reason = error.localizedDescription
+                    await MainActor.run {
+                        let skipped = SkippedItem(id: failedItem.id, item: failedItem, reason: reason)
+                        self.skippedItems.append(skipped)
+                        self.skippedFailedItems.append(failedItem)
+                    }
                 }
             }
         }
@@ -624,9 +734,31 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
     }
 
     public func retryFailedItems() {
-        guard !skippedFailedItems.isEmpty else { return }
-        let toRetry = skippedFailedItems
+        guard !skippedItems.isEmpty || !skippedFailedItems.isEmpty else { return }
+        let toRetry = !skippedItems.isEmpty ? skippedItems.map { $0.item } : skippedFailedItems
+        skippedItems.removeAll()
         skippedFailedItems.removeAll()
         pendingQueue = toRetry + pendingQueue
+    }
+
+    public func clearSkippedItems() {
+        skippedItems.removeAll()
+        skippedFailedItems.removeAll()
+    }
+
+    public func exportSkippedReport() -> String {
+        var report = "# PixOS Skipped Items Report\n"
+        let df = DateFormatter()
+        df.dateStyle = .medium
+        df.timeStyle = .medium
+        report += "Generated: \(df.string(from: Date()))\n"
+        report += "Total Skipped: \(skippedItems.count)\n\n"
+        report += "| Filename | Size | Failure Reason |\n"
+        report += "| --- | --- | --- |\n"
+        for item in skippedItems {
+            let sizeStr = ByteCountFormatter.string(fromByteCount: item.item.fileSize, countStyle: .file)
+            report += "| \(item.item.filename) | \(sizeStr) | \(item.reason) |\n"
+        }
+        return report
     }
 }
