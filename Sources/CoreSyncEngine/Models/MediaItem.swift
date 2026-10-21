@@ -109,6 +109,8 @@ public struct StorageInfo: Sendable, Equatable {
 }
 
 public struct SyncConfiguration: Sendable, Equatable {
+    public static let unlimitedBatchSize: Int64 = Int64.max
+
     public var batchSizeLimitBytes: Int64
     public var combineLivePhotos: Bool
     public var includeScreenshots: Bool

@@ -20,10 +20,15 @@ mkdir -p "$APP_DIR/Contents/Resources/bin"
 cp "$ROOT_DIR/.build/release/PixOSApp" "$APP_DIR/Contents/MacOS/PixOSApp"
 chmod +x "$APP_DIR/Contents/MacOS/PixOSApp"
 
-# 3. Copy Bundled ADB
+# 3. Copy Bundled ADB & pixos CLI into App Resources
 if [ -f "$ROOT_DIR/bin/adb" ]; then
     cp "$ROOT_DIR/bin/adb" "$APP_DIR/Contents/Resources/bin/adb"
     chmod +x "$APP_DIR/Contents/Resources/bin/adb"
+fi
+
+if [ -f "$ROOT_DIR/.build/release/pixos" ]; then
+    cp "$ROOT_DIR/.build/release/pixos" "$APP_DIR/Contents/Resources/bin/pixos"
+    chmod +x "$APP_DIR/Contents/Resources/bin/pixos"
 fi
 
 # 4. Generate Info.plist

@@ -165,20 +165,24 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
 
         // Partition into batches based on batchSizeLimitBytes
         var batches: [[MediaItem]] = []
-        var currentBatch: [MediaItem] = []
-        var currentBatchSize: Int64 = 0
+        if config.batchSizeLimitBytes == SyncConfiguration.unlimitedBatchSize {
+            batches = [itemsToSync]
+        } else {
+            var currentBatch: [MediaItem] = []
+            var currentBatchSize: Int64 = 0
 
-        for item in itemsToSync {
-            currentBatch.append(item)
-            currentBatchSize += item.fileSize
-            if currentBatchSize >= config.batchSizeLimitBytes {
-                batches.append(currentBatch)
-                currentBatch = []
-                currentBatchSize = 0
+            for item in itemsToSync {
+                currentBatch.append(item)
+                currentBatchSize += item.fileSize
+                if currentBatchSize >= config.batchSizeLimitBytes {
+                    batches.append(currentBatch)
+                    currentBatch = []
+                    currentBatchSize = 0
+                }
             }
-        }
-        if !currentBatch.isEmpty {
-            batches.append(currentBatch)
+            if !currentBatch.isEmpty {
+                batches.append(currentBatch)
+            }
         }
 
         let totalBatches = batches.count
@@ -204,11 +208,16 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
             await MainActor.run { self.pixelStorage = updatedStorage }
 
             let batchBytes = batch.reduce(0) { $0 + $1.fileSize }
-            if storage.freeBytes < (batchBytes + config.safeFreeStorageThresholdBytes) {
+            let isUnlimited = (config.batchSizeLimitBytes == SyncConfiguration.unlimitedBatchSize)
+            let storageCheckFailed = isUnlimited 
+                ? (storage.freeBytes < 500 * 1024 * 1024)
+                : (storage.freeBytes < (batchBytes + config.safeFreeStorageThresholdBytes))
+
+            if storageCheckFailed {
                 await MainActor.run {
                     self.state = .pausedForStorage
                     self.progress.isPausedForStorage = true
-                    self.progress.statusDescription = "Paused: Pixel storage low. Please free up space in Google Photos."
+                    self.progress.statusDescription = "Paused: Pixel storage critical. Free up space on Pixel Google Photos to continue."
                 }
                 return
             }

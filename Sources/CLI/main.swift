@@ -133,8 +133,15 @@ func main() async {
         print(banner)
         var config = SyncConfiguration()
 
-        if let bIndex = args.firstIndex(of: "--batch-size"), bIndex + 1 < args.count, let gb = Int64(args[bIndex + 1]) {
-            config.batchSizeLimitBytes = gb * 1024 * 1024 * 1024
+        if args.contains("--unlimited") {
+            config.batchSizeLimitBytes = SyncConfiguration.unlimitedBatchSize
+        } else if let bIndex = args.firstIndex(of: "--batch-size"), bIndex + 1 < args.count {
+            let val = args[bIndex + 1].lowercased()
+            if val == "unlimited" || val == "all" || val == "0" {
+                config.batchSizeLimitBytes = SyncConfiguration.unlimitedBatchSize
+            } else if let gb = Int64(val) {
+                config.batchSizeLimitBytes = gb * 1024 * 1024 * 1024
+            }
         }
         if args.contains("--no-motion-photos") {
             config.combineLivePhotos = false

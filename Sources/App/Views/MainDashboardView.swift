@@ -75,7 +75,7 @@ public struct MainDashboardView: View {
                     .ignoresSafeArea()
                     .onTapGesture { vm.showingOnboarding = false }
 
-                OnboardingView(onDismiss: { vm.showingOnboarding = false })
+                OnboardingView(orchestrator: orchestrator, onDismiss: { vm.showingOnboarding = false })
                     .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
                     .cornerRadius(16)
                     .shadow(radius: 20)
@@ -354,6 +354,7 @@ public struct MainDashboardView: View {
                     Text("5 GB (Recommended)").tag(Int64(5 * 1024 * 1024 * 1024))
                     Text("10 GB").tag(Int64(10 * 1024 * 1024 * 1024))
                     Text("20 GB").tag(Int64(20 * 1024 * 1024 * 1024))
+                    Text("Unlimited (All at Once)").tag(SyncConfiguration.unlimitedBatchSize)
                 }
                 .pickerStyle(.menu)
             }

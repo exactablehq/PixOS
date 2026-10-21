@@ -223,6 +223,14 @@ public final class ADBClient: Sendable {
         return stdout.contains("connected to")
     }
 
+    public func pairWireless(ip: String, port: Int, code: String) async throws -> Bool {
+        let (stdout, stderr, exitCode) = try await run(arguments: ["pair", "\(ip):\(port)", code])
+        guard exitCode == 0 else {
+            throw ADBError.wirelessConnectionFailed(reason: stderr.isEmpty ? stdout : stderr)
+        }
+        return stdout.lowercased().contains("successfully paired") || stdout.lowercased().contains("paired to")
+    }
+
     public func enableTcpip(port: Int = 5555, serial: String? = nil) async throws -> Bool {
         var args = ["tcpip", "\(port)"]
         if let serial = serial {

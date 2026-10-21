@@ -22,18 +22,7 @@ cp -R "$ROOT_DIR/build/PixOS.app" "$STAGING_DIR/PixOS.app"
 # 3. Create Applications symlink for standard macOS drag-and-drop install flow
 ln -s /Applications "$STAGING_DIR/Applications"
 
-# 4. Copy standalone CLI executable and install helper
-cp "$ROOT_DIR/.build/release/pixos" "$STAGING_DIR/pixos"
-cat << 'EOF' > "$STAGING_DIR/install_cli.sh"
-#!/bin/bash
-echo "Installing 'pixos' command line tool to /usr/local/bin..."
-sudo cp "$(dirname "$0")/pixos" /usr/local/bin/pixos
-sudo chmod +x /usr/local/bin/pixos
-echo "✔ Successfully installed pixos CLI! Run 'pixos help' to get started."
-EOF
-chmod +x "$STAGING_DIR/install_cli.sh"
-
-# 5. Build DMG using hdiutil
+# 4. Build DMG using hdiutil
 echo "Creating compressed read-only DMG image..."
 hdiutil create \
     -volname "PixOS" \
