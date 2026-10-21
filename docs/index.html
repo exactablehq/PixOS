@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <!-- Primary SEO Meta Tags -->
+    <title>PixOS — Unlimited Free Google Photos Backup for iPhone & Android</title>
+    <meta name="title" content="PixOS — Unlimited Free Google Photos Backup for iPhone & Android">
+    <meta name="description" content="PixOS is an open-source native macOS app and CLI utility that extracts full-resolution photos, 4K videos, and Live Photos from your iPhone and syncs them to Google Pixel via ADB for lifetime free unlimited original quality Google Photos backup.">
+    <meta name="keywords" content="iPhone to Android photo transfer, Google Pixel unlimited backup, iOS to Google Photos free original quality, bypass iCloud storage limit, Live Photos to Google Motion Photos converter, macOS iPhone photo backup, adb photo sync, transfer iPhone photos to Pixel, Google Photos unlimited original backup, PixOS, Exactable">
+    <meta name="author" content="Exactable">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://exactablehq.github.io/PixOS/">
+
+    <!-- OpenGraph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://exactablehq.github.io/PixOS/">
+    <meta property="og:title" content="PixOS — Unlimited Free Google Photos Backup for iPhone & Android">
+    <meta property="og:description" content="Bypass iCloud storage fees forever. Connect your iPhone and OG Google Pixel to your Mac. PixOS handles extraction, Live Photo conversion, and ADB sync with smart storage safeguards.">
+    <meta property="og:site_name" content="PixOS">
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:url" content="https://exactablehq.github.io/PixOS/">
+    <meta property="twitter:title" content="PixOS — Unlimited Free Google Photos Backup for iPhone">
+    <meta property="twitter:description" content="Native macOS app and CLI to backup iPhone photos directly through Google Pixel's free unlimited original quality storage.">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="style.css">
+
+    <!-- Schema.org JSON-LD Structured Data for A-Grade SEO -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "PixOS",
+      "operatingSystem": "macOS 14.0+",
+      "applicationCategory": "UtilitiesApplication",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "description": "Native macOS application and CLI to transfer full-resolution media and Live Photos from iPhone to Google Pixel via ADB for lifetime free unlimited original quality Google Photos cloud backup.",
+      "softwareVersion": "1.0.0",
+      "license": "https://opensource.org/licenses/MIT",
+      "author": {
+        "@type": "Organization",
+        "name": "Exactable",
+        "url": "https://github.com/exactablehq"
+      },
+      "downloadUrl": "https://github.com/exactablehq/PixOS/releases"
+    }
+    </script>
+</head>
+<body>
+    <!-- Glow Orb Backgrounds -->
+    <div class="ambient-glow glow-1" aria-hidden="true"></div>
+    <div class="ambient-glow glow-2" aria-hidden="true"></div>
+    <div class="ambient-glow glow-3" aria-hidden="true"></div>
+
+    <!-- Navigation Header -->
+    <header class="navbar" id="main-nav">
+        <div class="nav-container">
+            <a href="#" class="brand-logo" id="nav-brand">
+                <span class="logo-icon">⇄</span>
+                <span class="logo-text">PixOS</span>
+                <span class="badge-pill">v1.0.0</span>
+            </a>
+            <nav class="nav-links">
+                <a href="#features" class="nav-item">Features</a>
+                <a href="#how-it-works" class="nav-item">How It Works</a>
+                <a href="#tutorial" class="nav-item">Tutorial</a>
+                <a href="#faq" class="nav-item">FAQ</a>
+                <a href="https://github.com/exactablehq/PixOS" target="_blank" rel="noopener noreferrer" class="nav-item github-btn">
+                    <svg height="18" width="18" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                    </svg>
+                    GitHub
+                </a>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <main>
+        <section class="hero-section" id="hero">
+            <div class="hero-content">
+                <div class="hero-pill">
+                    <span class="pill-dot"></span>
+                    <span>100% Free & Open Source • MIT Licensed</span>
+                </div>
+                <h1 class="hero-title">
+                    Unlimited Google Photos Cloud Backup for <span class="gradient-text">Your iPhone</span>.
+                </h1>
+                <p class="hero-subtitle">
+                    Tired of paying for iCloud storage? Plug your iPhone and original Google Pixel into your Mac. <strong>PixOS</strong> automates original-quality extraction, packages Live Photos into Google Motion Photos, and syncs everything over ADB with smart storage protection.
+                </p>
+
+                <div class="hero-cta-group">
+                    <a href="https://github.com/exactablehq/PixOS/releases" class="cta-primary" id="download-dmg-btn">
+                        <svg class="cta-icon" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/>
+                        </svg>
+                        Download PixOS for macOS (.dmg)
+                    </a>
+                    <a href="#quickstart" class="cta-secondary" id="view-cli-btn">
+                        <span>Terminal CLI Quickstart</span>
+                        <span class="arrow">→</span>
+                    </a>
+                </div>
+
+                <div class="hero-stats">
+                    <div class="stat-item">
+                        <span class="stat-number">Original Quality</span>
+                        <span class="stat-label">Lossless 4K & ProRAW</span>
+                    </div>
+                    <div class="stat-divider"></div>
+                    <div class="stat-item">
+                        <span class="stat-number">$0 / Month</span>
+                        <span class="stat-label">Lifetime Google Backup</span>
+                    </div>
+                    <div class="stat-divider"></div>
+                    <div class="stat-item">
+                        <span class="stat-number">Live Photos</span>
+                        <span class="stat-label">Motion Photo XMP</span>
+                    </div>
+                    <div class="stat-divider"></div>
+                    <div class="stat-item">
+                        <span class="stat-number">Bundled ADB</span>
+                        <span class="stat-label">Zero Extra Installs</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Interactive Retina Liquid Glass App Simulator -->
+            <div class="app-preview-wrapper" id="preview">
+                <div class="glass-window-frame">
+                    <div class="window-titlebar">
+                        <div class="window-controls">
+                            <span class="control-btn close"></span>
+                            <span class="control-btn minimize"></span>
+                            <span class="control-btn zoom"></span>
+                        </div>
+                        <div class="window-title">PixOS — Sync Dashboard</div>
+                        <div class="window-badge">PRO EDITION</div>
+                    </div>
+
+                    <div class="window-body">
+                        <!-- Simulated Top Device Row -->
+                        <div class="sim-device-row">
+                            <div class="sim-device-card active">
+                                <div class="device-icon-box ios">
+                                    <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                                        <path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/>
+                                    </svg>
+                                </div>
+                                <div class="device-meta">
+                                    <div class="device-name">iPhone 15 Pro <span class="dot-online"></span></div>
+                                    <div class="device-sub">3,482 items • USB 3.0 High-Speed</div>
+                                </div>
+                            </div>
+
+                            <div class="sim-device-card active">
+                                <div class="device-icon-box android">
+                                    <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                                        <path d="M17 1H7c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-2-2-2zm0 18H7V5h10v14z"/>
+                                    </svg>
+                                </div>
+                                <div class="device-meta">
+                                    <div class="device-name">Google Pixel (2016) <span class="badge-unlimited">UNLIMITED</span></div>
+                                    <div class="device-sub">24.2 GB Free • Wireless ADB Ready</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Simulated Storage Pipeline -->
+                        <div class="sim-storage-box">
+                            <div class="storage-header">
+                                <div>
+                                    <div class="storage-title">Transfer Pipeline Status</div>
+                                    <div class="storage-desc">Extracting iPhone Masters → Synthesizing Motion Photos → /sdcard/DCIM/iPhone/</div>
+                                </div>
+                                <div class="storage-counter">
+                                    <span class="count-val">124 pending</span>
+                                    <span class="count-size">(4.82 GB)</span>
+                                </div>
+                            </div>
+                            <div class="sim-progress-track">
+                                <div class="sim-progress-fill" style="width: 68%;"></div>
+                            </div>
+                            <div class="storage-footer">
+                                <span>Transferring IMG_4821.HEIC (Google Motion Photo)</span>
+                                <span class="speed-pill">41.8 MB/s</span>
+                            </div>
+                        </div>
+
+                        <!-- Simulated Configuration Bar -->
+                        <div class="sim-config-bar">
+                            <label class="sim-toggle-pill active">
+                                <span class="chk">✓</span> Google Motion Photos
+                            </label>
+                            <label class="sim-toggle-pill active">
+                                <span class="chk">✓</span> 5 GB Smart Batches
+                            </label>
+                            <label class="sim-toggle-pill active">
+                                <span class="chk">✓</span> Purge Mac Cache
+                            </label>
+                            <label class="sim-toggle-pill">
+                                <span class="chk"></span> Skip Screenshots
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Feature Grid -->
+        <section class="features-section" id="features">
+            <div class="section-container">
+                <div class="section-header">
+                    <h2 class="section-title">Built for Performance, Freedom, and Zero Subscriptions</h2>
+                    <p class="section-desc">The original 2016 Google Pixel is the only phone in the world with lifetime original quality Google Photos uploads. PixOS unlocks that superpower for every iPhone owner.</p>
+                </div>
+
+                <div class="features-grid">
+                    <div class="feature-card">
+                        <div class="feature-icon-wrapper">
+                            <span class="feature-icon">♾️</span>
+                        </div>
+                        <h3 class="feature-title">Unlimited Free Cloud Backup</h3>
+                        <p class="feature-text">Stop paying Apple $10–$30/month for iCloud. Google Photos backs up all photos and videos pushed to the OG Pixel in 100% untouched original quality forever.</p>
+                    </div>
+
+                    <div class="feature-card">
+                        <div class="feature-icon-wrapper">
+                            <span class="feature-icon">📸</span>
+                        </div>
+                        <h3 class="feature-title">Live Photos → Google Motion Photos</h3>
+                        <p class="feature-text">Our custom synthesizer injects standardized Google Camera XMP container metadata and multiplexes your 3-second companion MOV so your Live Photos remain animated in Google Photos.</p>
+                    </div>
+
+                    <div class="feature-card">
+                        <div class="feature-icon-wrapper">
+                            <span class="feature-icon">⚡</span>
+                        </div>
+                        <h3 class="feature-title">Native macOS ImageCaptureCore</h3>
+                        <p class="feature-text">Direct hardware communication over USB using Apple's official APIs. Zero third-party drivers, zero pairing certs, and zero jailbreaking required. Lossless and blisteringly fast.</p>
+                    </div>
+
+                    <div class="feature-card">
+                        <div class="feature-icon-wrapper">
+                            <span class="feature-icon">🛡️</span>
+                        </div>
+                        <h3 class="feature-title">Smart Batching & Storage Guard</h3>
+                        <p class="feature-text">The Pixel 1 has 32GB or 128GB of internal storage. PixOS queries Pixel free space, transfers in smart 5GB batches, and pauses if storage is low so Google Photos has time to upload.</p>
+                    </div>
+
+                    <div class="feature-card">
+                        <div class="feature-icon-wrapper">
+                            <span class="feature-icon">📡</span>
+                        </div>
+                        <h3 class="feature-title">Dual-Mode ADB (USB + Wi-Fi)</h3>
+                        <p class="feature-text">Leave your Google Pixel charging across the room on your desk. PixOS pairs over Wireless ADB with one click so you only need to plug in your iPhone.</p>
+                    </div>
+
+                    <div class="feature-card">
+                        <div class="feature-icon-wrapper">
+                            <span class="feature-icon">🗑️</span>
+                        </div>
+                        <h3 class="feature-title">Safe iPhone Space Saver</h3>
+                        <p class="feature-text">Extraction is strictly read-only. Once files are safely verified on the Pixel, PixOS offers an optional prompt to delete backed-up items from your iPhone to reclaim gigabytes of storage.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Step-by-Step Tutorial / Onboarding Section -->
+        <section class="tutorial-section" id="tutorial">
+            <div class="section-container">
+                <div class="section-header">
+                    <h2 class="section-title">Get Started in 3 Simple Steps</h2>
+                    <p class="section-desc">No command line or technical knowledge required. Drag the app to Applications and follow the on-screen prompts.</p>
+                </div>
+
+                <div class="tutorial-steps">
+                    <div class="step-card">
+                        <div class="step-number">01</div>
+                        <h3 class="step-title">Connect Your iPhone</h3>
+                        <p class="step-desc">Plug your iPhone into your Mac via Lightning or USB-C. Unlock the screen and tap <strong>"Trust This Computer"</strong>. PixOS automatically detects your camera roll.</p>
+                    </div>
+
+                    <div class="step-card">
+                        <div class="step-number">02</div>
+                        <h3 class="step-title">Connect Google Pixel</h3>
+                        <p class="step-desc">On your Pixel, enable <strong>Developer Options</strong> and toggle on <strong>USB Debugging</strong>. Plug it in via USB or pair via Wireless ADB. Bundled ADB handles the rest.</p>
+                    </div>
+
+                    <div class="step-card">
+                        <div class="step-number">03</div>
+                        <h3 class="step-title">Click "Start Sync to Pixel"</h3>
+                        <p class="step-desc">PixOS transfers your media to <code>/sdcard/DCIM/iPhone/</code>, triggers Android's MediaScanner, and Google Photos starts uploading original quality backups immediately!</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Terminal Quickstart Section -->
+        <section class="cli-section" id="quickstart">
+            <div class="section-container">
+                <div class="section-header">
+                    <h2 class="section-title">Prefer the Command Line? Use the <code>pixos</code> CLI</h2>
+                    <p class="section-desc">PixOS includes a standalone, scriptable terminal executable compiled natively for Apple Silicon & Universal macOS.</p>
+                </div>
+
+                <div class="terminal-card">
+                    <div class="terminal-bar">
+                        <div class="terminal-dots">
+                            <span></span><span></span><span></span>
+                        </div>
+                        <div class="terminal-title">Terminal — zsh</div>
+                    </div>
+                    <pre class="terminal-body"><code><span class="cmd-prompt">$</span> <span class="cmd-text">pixos status</span>
+<span class="cmd-dim">Scanning for connected devices...</span>
+
+<span class="cmd-highlight">--- [iPhone (Source)] ---</span>
+  Status:     <span class="cmd-success">Connected (USB)</span>
+  Name:       iPhone 15 Pro (3,482 items)
+
+<span class="cmd-highlight">--- [Google Pixel (Destination)] ---</span>
+  Status:     <span class="cmd-success">Connected (Wireless ADB)</span>
+  Model:      Pixel (sailfish) • 24.2 GB Free
+
+<span class="cmd-prompt">$</span> <span class="cmd-text">pixos sync --batch-size 5G</span>
+<span class="cmd-success">✔ Initialized 5GB smart batching pipeline</span>
+<span class="cmd-dim">Transferring IMG_4821.HEIC... [34.5 MB/s]</span>
+<span class="cmd-success">✔ Sync complete! Backed up 124 items to Google Pixel.</span></code></pre>
+                </div>
+            </div>
+        </section>
+
+        <!-- FAQ Section for Search Optimization -->
+        <section class="faq-section" id="faq">
+            <div class="section-container">
+                <div class="section-header">
+                    <h2 class="section-title">Frequently Asked Questions</h2>
+                    <p class="section-desc">Everything you need to know about Google Pixel unlimited backup and transferring from iOS.</p>
+                </div>
+
+                <div class="faq-accordion">
+                    <details class="faq-item">
+                        <summary class="faq-question">Why does the original 2016 Google Pixel have unlimited storage?</summary>
+                        <div class="faq-answer">
+                            When Google released the original Pixel (OG Pixel 2016, "sailfish" / "marlin"), they promised lifetime unlimited original quality Google Photos cloud backups for life for any photo or video backed up from that physical device. That promise remains active today!
+                        </div>
+                    </details>
+
+                    <details class="faq-item">
+                        <summary class="faq-question">Will my iPhone photos and 4K videos be compressed?</summary>
+                        <div class="faq-answer">
+                            No. PixOS transfers the original lossless master media directly from your iPhone (including 4K 60fps HDR, ProRAW DNG, and ProRes). When uploaded via the OG Pixel, Google Photos uploads them at full Original Quality with zero compression.
+                        </div>
+                    </details>
+
+                    <details class="faq-item">
+                        <summary class="faq-question">How does PixOS handle Live Photos?</summary>
+                        <div class="faq-answer">
+                            PixOS automatically pairs the still image (.HEIC / .JPG) with the companion 3-second QuickTime video (.MOV) and injects standardized Google Camera Motion Photo XMP container metadata. Google Photos displays and plays it as a native Motion Photo.
+                        </div>
+                    </details>
+
+                    <details class="faq-item">
+                        <summary class="faq-question">Do I need to install ADB or Android Studio manually?</summary>
+                        <div class="faq-answer">
+                            No! PixOS comes with a prepackaged ADB binary inside the application bundle. You do not need Homebrew, Android Studio, or any terminal setup.
+                        </div>
+                    </details>
+
+                    <details class="faq-item">
+                        <summary class="faq-question">Can I connect my Google Pixel over Wi-Fi instead of USB cable?</summary>
+                        <div class="faq-answer">
+                            Yes! PixOS features full Dual-Mode ADB. You can connect your Pixel over your local home Wi-Fi network using Wireless ADB, while keeping only your iPhone connected via USB cable.
+                        </div>
+                    </details>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-container">
+            <div class="footer-left">
+                <div class="brand-logo footer-brand">
+                    <span class="logo-icon">⇄</span>
+                    <span class="logo-text">PixOS</span>
+                </div>
+                <p class="footer-tagline">Open Source iOS to Android Photo Bridge & Backup Engine.</p>
+                <p class="footer-copy">Released under the MIT License • Copyright © 2026 Exactable.</p>
+            </div>
+            <div class="footer-right">
+                <div class="footer-col">
+                    <span class="col-title">Project</span>
+                    <a href="https://github.com/exactablehq/PixOS" target="_blank" rel="noopener noreferrer">GitHub Repository</a>
+                    <a href="https://github.com/exactablehq/PixOS/releases" target="_blank" rel="noopener noreferrer">Releases (.dmg)</a>
+                    <a href="https://github.com/exactablehq/PixOS/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a>
+                </div>
+                <div class="footer-col">
+                    <span class="col-title">Exactable</span>
+                    <a href="https://github.com/exactablehq" target="_blank" rel="noopener noreferrer">Organization</a>
+                    <a href="https://github.com/exactablehq/PixOS/issues" target="_blank" rel="noopener noreferrer">Report an Issue</a>
+                    <a href="https://github.com/exactablehq/PixOS/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener noreferrer">Contributing</a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Interactive JS -->
+    <script src="app.js"></script>
+</body>
+</html>
