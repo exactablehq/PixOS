@@ -22,7 +22,7 @@ public enum PhotoKitError: LocalizedError, Sendable {
     }
 }
 
-public final class PhotoKitSourceManager: ObservableObject, @unchecked Sendable {
+public final class PhotoKitSourceManager: NSObject, ObservableObject, PHPhotoLibraryChangeObserver, @unchecked Sendable {
     @Published public var authorizationStatus: PHAuthorizationStatus = .notDetermined
     @Published public var isCatalogComplete: Bool = false
     @Published public var totalAssetCount: Int = 0
@@ -32,13 +32,36 @@ public final class PhotoKitSourceManager: ObservableObject, @unchecked Sendable 
     public var onCatalogCompleted: (() -> Void)?
 
     private var catalogTask: Task<Void, Never>?
+    private var isRegisteredObserver: Bool = false
 
-    public init() {
+    public override init() {
+        super.init()
         self.authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        if self.authorizationStatus == .authorized || self.authorizationStatus == .limited {
+            PHPhotoLibrary.shared().register(self)
+            self.isRegisteredObserver = true
+        }
+    }
+
+    deinit {
+        if isRegisteredObserver {
+            PHPhotoLibrary.shared().unregisterChangeObserver(self)
+        }
+    }
+
+    public func photoLibraryDidChange(_ changeInstance: PHChange) {
+        // Automatically re-index when iCloud Photos syncs new assets into the system library
+        DispatchQueue.main.async { [weak self] in
+            self?.startCataloging()
+        }
     }
 
     public func updateAuthorizationStatus() {
         self.authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        if (self.authorizationStatus == .authorized || self.authorizationStatus == .limited) && !isRegisteredObserver {
+            PHPhotoLibrary.shared().register(self)
+            self.isRegisteredObserver = true
+        }
     }
 
     public func requestAuthorization() async -> Bool {
@@ -49,8 +72,22 @@ public final class PhotoKitSourceManager: ObservableObject, @unchecked Sendable 
         }
         await MainActor.run {
             self.authorizationStatus = status
+            if (status == .authorized || status == .limited) && !self.isRegisteredObserver {
+                PHPhotoLibrary.shared().register(self)
+                self.isRegisteredObserver = true
+            }
         }
         return status == .authorized || status == .limited
+    }
+
+    public func openMacPhotos() {
+        NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Photos.app"))
+    }
+
+    public func openPrivacySettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Photos") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     public func startCataloging() {
@@ -71,10 +108,27 @@ public final class PhotoKitSourceManager: ObservableObject, @unchecked Sendable 
             self.catalogedMediaItems.removeAll()
         }
 
-        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-        guard status == .authorized || status == .limited else {
+        var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        if status == .notDetermined {
+            status = await withCheckedContinuation { continuation in
+                PHPhotoLibrary.requestAuthorization(for: .readWrite) { newStatus in
+                    continuation.resume(returning: newStatus)
+                }
+            }
+            let updatedStatus = status
             await MainActor.run {
-                self.authorizationStatus = status
+                self.authorizationStatus = updatedStatus
+                if (updatedStatus == .authorized || updatedStatus == .limited) && !self.isRegisteredObserver {
+                    PHPhotoLibrary.shared().register(self)
+                    self.isRegisteredObserver = true
+                }
+            }
+        }
+
+        guard status == .authorized || status == .limited else {
+            let finalStatus = status
+            await MainActor.run {
+                self.authorizationStatus = finalStatus
                 self.isCatalogComplete = true
                 self.onCatalogCompleted?()
             }
@@ -83,7 +137,8 @@ public final class PhotoKitSourceManager: ObservableObject, @unchecked Sendable 
 
         let fetchOptions = PHFetchOptions()
         fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        fetchOptions.includeAssetSourceTypes = [.typeUserLibrary, .typeCloudShared, .typeiTunesSynced]
+        fetchOptions.includeHiddenAssets = false
+        // Fetch all media items without restrictive source-type filters
 
         let fetchResult = PHAsset.fetchAssets(with: fetchOptions)
         let total = fetchResult.count

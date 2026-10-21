@@ -255,7 +255,89 @@ public struct MainDashboardView: View {
                 .cornerRadius(12)
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.blue.opacity(0.2), lineWidth: 1))
             }
+
+            if orchestrator.selectedSourceType == .icloudPhotos && orchestrator.isCatalogComplete && orchestrator.allDiscoveredMedia.isEmpty {
+                iCloudSetupGuideCard
+            }
         }
+    }
+
+    private var iCloudSetupGuideCard: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 22))
+                .foregroundColor(.orange)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("0 Items in Mac Library — macOS iCloud Sync Required")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(.primary)
+                    Spacer()
+                }
+
+                Text("Apple's PhotoKit accesses your media via the macOS System Photo Library. If your Mac Photos app has never synced with your iCloud account, your Mac catalog is currently empty.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .top, spacing: 6) {
+                        Text("1.")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.blue)
+                        Text("Open Photos app (Cmd+,) → **General** tab → Click **'Use as System Photo Library'** (until greyed out).")
+                            .font(.system(size: 11))
+                    }
+                    HStack(alignment: .top, spacing: 6) {
+                        Text("2.")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.blue)
+                        Text("Photos → **iCloud** tab → Check **'[✓] iCloud Photos'** and select **'Optimize Mac Storage'** (zero disk bloat).")
+                            .font(.system(size: 11))
+                    }
+                }
+                .padding(.vertical, 2)
+
+                HStack(spacing: 10) {
+                    Button(action: { orchestrator.photoKitManager.openMacPhotos() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "photo.on.rectangle.angled")
+                            Text("Open Mac Photos App")
+                        }
+                        .font(.system(size: 11, weight: .semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.blue)
+                    .controlSize(.small)
+
+                    Button(action: { orchestrator.photoKitManager.openPrivacySettings() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "lock.shield")
+                            Text("Privacy Settings")
+                        }
+                        .font(.system(size: 11))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    Button(action: { orchestrator.refreshIPhone() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.clockwise")
+                            Text("Check Again")
+                        }
+                        .font(.system(size: 11))
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                }
+                .padding(.top, 4)
+            }
+        }
+        .padding(14)
+        .background(Color.orange.opacity(0.08))
+        .cornerRadius(12)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.orange.opacity(0.3), lineWidth: 1))
     }
 
     private var iCloudSourceCard: some View {
