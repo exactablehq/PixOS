@@ -186,7 +186,7 @@ public final class PhotoKitSourceManager: ObservableObject, @unchecked Sendable 
             mediaType = .livePhoto
         } else if asset.mediaSubtypes.contains(.photoScreenshot) {
             mediaType = .screenshot
-        } else if asset.mediaSubtypes.contains(.videoScreenRecording) {
+        } else if asset.mediaSubtypes.contains(PHAssetMediaSubtype(rawValue: 1 << 19)) {
             mediaType = .screenRecording
         } else if asset.mediaType == .video {
             mediaType = .video
