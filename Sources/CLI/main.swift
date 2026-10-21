@@ -60,17 +60,18 @@ func main() async {
     switch command.lowercased() {
     case "status":
         print(banner)
-        print("\u{001B}[1m🔍 Scanning for connected devices...\u{001B}[0m\n")
+        print("\u{001B}[1m🔍 Scanning for connected devices & reading camera roll...\u{001B}[0m\n")
 
         orchestrator.startMonitoring()
-        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        _ = await orchestrator.waitForMedia(timeout: 3.5)
 
         print("\u{001B}[1m--- [iPhone (Source)] ---\u{001B}[0m")
         if let phone = orchestrator.connectedIPhone {
             print("  Status:     \u{001B}[32mConnected (USB)\u{001B}[0m")
             print("  Name:       \(phone.name)")
-            print("  Media:      \(phone.totalMediaCount) items detected")
-            print("  Lock State: \(phone.isLocked ? "\u{001B}[33mLocked (Please unlock device)\u{001B}[0m" : "Unlocked")")
+            let catalogStatus = orchestrator.isCatalogComplete ? "Catalog complete" : "Indexing..."
+            print("  Media:      \(phone.totalMediaCount) items detected (\(catalogStatus))")
+            print("  Lock State: \(phone.isLocked ? "\u{001B}[33mPasscode Locked (Please unlock device screen)\u{001B}[0m" : "\u{001B}[32mUnlocked & Ready\u{001B}[0m")")
         } else {
             print("  Status:     \u{001B}[31mNot Detected\u{001B}[0m (Plug in iPhone via USB and tap 'Trust This Computer')")
         }
@@ -103,9 +104,9 @@ func main() async {
 
     case "devices":
         print(banner)
-        print("\u{001B}[1m🔍 Scanning for connected devices...\u{001B}[0m\n")
+        print("\u{001B}[1m🔍 Scanning for connected devices & reading camera roll...\u{001B}[0m\n")
         orchestrator.startMonitoring()
-        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        _ = await orchestrator.waitForMedia(timeout: 3.5)
 
         print("\u{001B}[1m--- [Available Source Devices (iOS)] ---\u{001B}[0m")
         if orchestrator.availableIPhones.isEmpty {
@@ -113,8 +114,9 @@ func main() async {
         } else {
             for (idx, phone) in orchestrator.availableIPhones.enumerated() {
                 let isSelected = phone.id == orchestrator.selectedIPhoneId ? " \u{001B}[32m(Selected)\u{001B}[0m" : ""
+                let lockStatus = phone.isLocked ? "\u{001B}[33mPasscode Locked\u{001B}[0m" : "\u{001B}[32mUnlocked\u{001B}[0m"
                 print("  [\(idx + 1)] \(phone.name) [ID: \(phone.id)]\(isSelected)")
-                print("      \(phone.totalMediaCount) camera items • \(phone.isLocked ? "Locked" : "Unlocked")")
+                print("      \(phone.totalMediaCount) camera items • \(lockStatus)")
             }
         }
 
@@ -198,8 +200,8 @@ func main() async {
         orchestrator.config = config
         orchestrator.startMonitoring()
 
-        print("🔍 Connecting to devices (waiting up to 3 seconds)...")
-        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        print("🔍 Connecting to devices and waiting for iPhone photo catalog...")
+        _ = await orchestrator.waitForMedia(timeout: 3.5)
 
         if let sIndex = args.firstIndex(of: "--source"), sIndex + 1 < args.count {
             let targetSource = args[sIndex + 1]
@@ -213,10 +215,38 @@ func main() async {
             orchestrator.selectTargetPixel(serial: targetSerial)
         }
 
-        guard let phone = orchestrator.connectedIPhone else {
+        guard var phone = orchestrator.connectedIPhone else {
             print("\u{001B}[31mError:\u{001B}[0m iPhone not detected. Connect via USB and unlock phone.")
             return
         }
+
+        if phone.isLocked {
+            print("\n\u{001B}[33m🔒 iPhone is Passcode Locked\u{001B}[0m")
+            print("👉 Please unlock your iPhone screen with Face ID / Passcode and tap 'Trust This Computer' if prompted.")
+            print("⏳ Waiting up to 20 seconds for unlock...")
+
+            var unlocked = false
+            for _ in 0..<40 {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                if let p = orchestrator.connectedIPhone, !p.isLocked {
+                    unlocked = true
+                    phone = p
+                    break
+                }
+            }
+
+            if !unlocked {
+                print("\u{001B}[31mError:\u{001B}[0m iPhone remained locked. Unlock screen and try again.")
+                return
+            }
+
+            print("\u{001B}[32m✔ iPhone unlocked! Reading full media catalog...\u{001B}[0m")
+            _ = await orchestrator.waitForMedia(timeout: 5.0)
+            if let p = orchestrator.connectedIPhone {
+                phone = p
+            }
+        }
+
         guard let pixel = orchestrator.connectedPixel, pixel.isAuthorized else {
             print("\u{001B}[31mError:\u{001B}[0m Google Pixel not detected or unauthorized. Check USB debugging.")
             return

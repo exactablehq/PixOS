@@ -9,6 +9,7 @@ public struct ConnectedIPhone: Identifiable, Sendable, Equatable {
     public let hasOpenSession: Bool
     public let totalMediaCount: Int
     public let batteryLevel: Int
+    public let isCatalogComplete: Bool
 
     public init(
         id: String,
@@ -16,7 +17,8 @@ public struct ConnectedIPhone: Identifiable, Sendable, Equatable {
         isLocked: Bool,
         hasOpenSession: Bool,
         totalMediaCount: Int,
-        batteryLevel: Int
+        batteryLevel: Int,
+        isCatalogComplete: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -24,6 +26,7 @@ public struct ConnectedIPhone: Identifiable, Sendable, Equatable {
         self.hasOpenSession = hasOpenSession
         self.totalMediaCount = totalMediaCount
         self.batteryLevel = batteryLevel
+        self.isCatalogComplete = isCatalogComplete
     }
 }
 
@@ -32,6 +35,8 @@ public final class ImageCaptureManager: NSObject, @unchecked Sendable, ICDeviceB
     public private(set) var activeCamera: ICCameraDevice?
     public var onDeviceListChanged: (([ConnectedIPhone]) -> Void)?
     public var onMediaItemsLoaded: (([MediaItem]) -> Void)?
+    public var onCatalogCompleted: (() -> Void)?
+    public private(set) var isCatalogComplete: Bool = false
 
     private var cachedMediaFiles: [String: ICCameraFile] = [:]
     public private(set) var discoveredCameras: [ICCameraDevice] = []
@@ -55,11 +60,18 @@ public final class ImageCaptureManager: NSObject, @unchecked Sendable, ICDeviceB
         browser.stop()
     }
 
+    private func configureCamera(_ camera: ICCameraDevice) {
+        camera.delegate = self
+        // Ensure original assets (HEIC, RAW, and companion Live Photo .MOV videos) are exposed without transcoding
+        camera.mediaPresentation = .originalAssets
+    }
+
     public func selectCamera(id: String) {
         syncQueue.sync {
             if let selected = discoveredCameras.first(where: { ($0.uuidString ?? $0.name) == id }) {
                 if activeCamera != selected {
                     activeCamera = selected
+                    configureCamera(selected)
                     if !selected.hasOpenSession {
                         selected.requestOpenSession()
                     } else {
@@ -71,11 +83,30 @@ public final class ImageCaptureManager: NSObject, @unchecked Sendable, ICDeviceB
         notifyDeviceChanged()
     }
 
+    public func refreshActiveCamera() {
+        guard let camera = activeCamera else { return }
+        configureCamera(camera)
+        if !camera.hasOpenSession {
+            camera.requestOpenSession()
+        } else {
+            let files = extractAllFiles(from: camera)
+            if files.isEmpty {
+                camera.requestCloseSession()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    camera.requestOpenSession()
+                }
+            } else {
+                processCameraFiles(camera: camera)
+            }
+        }
+        notifyDeviceChanged()
+    }
+
     // MARK: - ICDeviceBrowserDelegate
 
     public func deviceBrowser(_ browser: ICDeviceBrowser, didAdd device: ICDevice, moreComing: Bool) {
         if let camera = device as? ICCameraDevice {
-            camera.delegate = self
+            configureCamera(camera)
             syncQueue.sync {
                 if !discoveredCameras.contains(where: { $0 == camera }) {
                     discoveredCameras.append(camera)
@@ -83,9 +114,11 @@ public final class ImageCaptureManager: NSObject, @unchecked Sendable, ICDeviceB
             }
             if activeCamera == nil {
                 activeCamera = camera
-                if !camera.hasOpenSession {
-                    camera.requestOpenSession()
-                }
+            }
+            if !camera.hasOpenSession {
+                camera.requestOpenSession()
+            } else {
+                processCameraFiles(camera: camera)
             }
             notifyDeviceChanged()
         }
@@ -98,8 +131,11 @@ public final class ImageCaptureManager: NSObject, @unchecked Sendable, ICDeviceB
             }
             if device == activeCamera {
                 activeCamera = discoveredCameras.first
-                if let next = activeCamera, !next.hasOpenSession {
-                    next.requestOpenSession()
+                if let next = activeCamera {
+                    configureCamera(next)
+                    if !next.hasOpenSession {
+                        next.requestOpenSession()
+                    }
                 }
             }
             notifyDeviceChanged()
@@ -115,8 +151,11 @@ public final class ImageCaptureManager: NSObject, @unchecked Sendable, ICDeviceB
             }
             if device == activeCamera {
                 activeCamera = discoveredCameras.first
-                if let next = activeCamera, !next.hasOpenSession {
-                    next.requestOpenSession()
+                if let next = activeCamera {
+                    configureCamera(next)
+                    if !next.hasOpenSession {
+                        next.requestOpenSession()
+                    }
                 }
             }
             notifyDeviceChanged()
@@ -125,6 +164,7 @@ public final class ImageCaptureManager: NSObject, @unchecked Sendable, ICDeviceB
 
     public func deviceDidBecomeReady(_ device: ICDevice) {
         if let camera = device as? ICCameraDevice {
+            configureCamera(camera)
             activeCamera = camera
             processCameraFiles(camera: camera)
             notifyDeviceChanged()
@@ -132,16 +172,18 @@ public final class ImageCaptureManager: NSObject, @unchecked Sendable, ICDeviceB
     }
 
     public func device(_ device: ICDevice, didOpenSessionWithError error: Error?) {
-        if error == nil, let camera = device as? ICCameraDevice {
+        guard let camera = device as? ICCameraDevice else { return }
+        if error == nil {
+            configureCamera(camera)
             activeCamera = camera
             processCameraFiles(camera: camera)
-            notifyDeviceChanged()
         }
+        notifyDeviceChanged()
     }
 
     public func device(_ device: ICDevice, didCloseSessionWithError error: Error?) {
-        if device == activeCamera {
-            activeCamera = nil
+        if device == activeCamera && discoveredCameras.count <= 1 {
+            // Keep reference if still present, session can be reopened
         }
         notifyDeviceChanged()
     }
@@ -156,14 +198,17 @@ public final class ImageCaptureManager: NSObject, @unchecked Sendable, ICDeviceB
 
     public func cameraDevice(_ camera: ICCameraDevice, didAdd items: [ICCameraItem]) {
         processCameraFiles(camera: camera)
+        notifyDeviceChanged()
     }
 
     public func cameraDevice(_ camera: ICCameraDevice, didRemove items: [ICCameraItem]) {
         processCameraFiles(camera: camera)
+        notifyDeviceChanged()
     }
 
     public func cameraDevice(_ camera: ICCameraDevice, didRenameItems items: [ICCameraItem]) {
         processCameraFiles(camera: camera)
+        notifyDeviceChanged()
     }
 
     public func cameraDeviceDidChangeCapability(_ camera: ICCameraDevice) {}
@@ -176,15 +221,29 @@ public final class ImageCaptureManager: NSObject, @unchecked Sendable, ICDeviceB
 
     public func deviceDidBecomeReady(withCompleteContentCatalog device: ICCameraDevice) {
         activeCamera = device
+        isCatalogComplete = true
         processCameraFiles(camera: device)
         notifyDeviceChanged()
+        onCatalogCompleted?()
     }
 
     public func cameraDeviceDidRemoveAccessRestriction(_ device: ICDevice) {
-        if let camera = device as? ICCameraDevice {
-            processCameraFiles(camera: camera)
-            notifyDeviceChanged()
+        guard let camera = device as? ICCameraDevice else { return }
+        configureCamera(camera)
+        if !camera.hasOpenSession {
+            camera.requestOpenSession()
+        } else {
+            let files = extractAllFiles(from: camera)
+            if files.isEmpty {
+                camera.requestCloseSession()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    camera.requestOpenSession()
+                }
+            } else {
+                processCameraFiles(camera: camera)
+            }
         }
+        notifyDeviceChanged()
     }
 
     public func cameraDeviceDidEnableAccessRestriction(_ device: ICDevice) {
@@ -193,8 +252,28 @@ public final class ImageCaptureManager: NSObject, @unchecked Sendable, ICDeviceB
 
     // MARK: - Processing Media Items
 
+    private func extractAllFiles(from camera: ICCameraDevice) -> [ICCameraFile] {
+        if let files = camera.mediaFiles as? [ICCameraFile], !files.isEmpty {
+            return files
+        }
+        var files: [ICCameraFile] = []
+        func traverse(items: [ICCameraItem]?) {
+            guard let items = items else { return }
+            for item in items {
+                if let file = item as? ICCameraFile {
+                    files.append(file)
+                } else if let folder = item as? ICCameraFolder {
+                    traverse(items: folder.contents)
+                }
+            }
+        }
+        traverse(items: camera.contents)
+        return files
+    }
+
     private func processCameraFiles(camera: ICCameraDevice) {
-        guard let files = camera.mediaFiles as? [ICCameraFile] else { return }
+        let files = extractAllFiles(from: camera)
+        guard !files.isEmpty else { return }
 
         syncQueue.sync {
             cachedMediaFiles.removeAll()
@@ -301,13 +380,17 @@ public final class ImageCaptureManager: NSObject, @unchecked Sendable, ICDeviceB
         }
 
         let phones = cameras.map { camera in
-            ConnectedIPhone(
+            // camera.isAccessRestrictedAppleDevice accurately determines whether passcode lock / untrusted host is active
+            let isLocked = camera.isAccessRestrictedAppleDevice
+            let fileCount = max(camera.mediaFiles?.count ?? 0, self.cachedMediaFiles.count)
+            return ConnectedIPhone(
                 id: camera.uuidString ?? camera.name ?? "iPhone",
                 name: camera.name ?? "iPhone",
-                isLocked: camera.isLocked,
+                isLocked: isLocked,
                 hasOpenSession: camera.hasOpenSession,
-                totalMediaCount: camera.mediaFiles?.count ?? 0,
-                batteryLevel: camera.batteryLevel
+                totalMediaCount: fileCount,
+                batteryLevel: camera.batteryLevel,
+                isCatalogComplete: self.isCatalogComplete
             )
         }
         onDeviceListChanged?(phones)

@@ -190,17 +190,34 @@ public struct MainDashboardView: View {
                                 .font(.system(size: 14, weight: .semibold))
                         }
 
-                        if orchestrator.connectedIPhone != nil {
+                        if let phone = orchestrator.connectedIPhone {
                             Circle()
-                                .fill(Color.green)
+                                .fill(phone.isLocked ? Color.orange : Color.green)
                                 .frame(width: 7, height: 7)
                         }
                     }
 
                     if let phone = orchestrator.connectedIPhone {
-                        Text("\(phone.totalMediaCount) camera items • \(phone.isLocked ? "Locked" : "Unlocked")")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
+                        if phone.isLocked {
+                            HStack(spacing: 4) {
+                                Image(systemName: "lock.fill")
+                                    .font(.system(size: 9))
+                                Text("Passcode Locked • Unlock iPhone screen")
+                                    .font(.system(size: 11))
+                            }
+                            .foregroundColor(.orange)
+                        } else if !orchestrator.isCatalogComplete && phone.totalMediaCount == 0 {
+                            HStack(spacing: 4) {
+                                ProgressView().controlSize(.mini)
+                                Text("Cataloging iPhone camera roll...")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                            }
+                        } else {
+                            Text("\(phone.totalMediaCount) camera items • Ready")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                        }
                     } else {
                         Text("Plug in via USB & tap 'Trust This Computer'")
                             .font(.system(size: 11))
@@ -208,6 +225,16 @@ public struct MainDashboardView: View {
                     }
                 }
                 Spacer()
+
+                if orchestrator.connectedIPhone != nil {
+                    Button(action: { orchestrator.refreshIPhone() }) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Refresh iPhone connection and catalog")
+                }
             }
             .padding(14)
             .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
@@ -627,6 +654,14 @@ public struct MainDashboardView: View {
                             .font(.caption.bold())
                             .foregroundColor(.yellow)
                     }
+                } else if orchestrator.connectedIPhone?.isLocked == true {
+                    HStack(spacing: 6) {
+                        Image(systemName: "lock.shield.fill")
+                            .foregroundColor(.orange)
+                        Text("iPhone is passcode locked. Unlock screen to access photos.")
+                            .font(.caption.bold())
+                            .foregroundColor(.orange)
+                    }
                 }
 
                 Spacer()
@@ -637,7 +672,8 @@ public struct MainDashboardView: View {
                     }
                     .buttonStyle(.bordered)
                 } else {
-                    let canSync = (orchestrator.connectedIPhone != nil && orchestrator.connectedPixel?.isAuthorized == true && !orchestrator.pendingQueue.isEmpty)
+                    let isLocked = orchestrator.connectedIPhone?.isLocked ?? false
+                    let canSync = (orchestrator.connectedIPhone != nil && !isLocked && orchestrator.connectedPixel?.isAuthorized == true && !orchestrator.pendingQueue.isEmpty)
 
                     Button(action: {
                         Task {
@@ -645,15 +681,15 @@ public struct MainDashboardView: View {
                         }
                     }) {
                         HStack(spacing: 8) {
-                            Image(systemName: "arrow.right.circle.fill")
-                            Text("Start Sync to Pixel")
+                            Image(systemName: isLocked ? "lock.fill" : "arrow.right.circle.fill")
+                            Text(isLocked ? "Unlock iPhone to Sync" : "Start Sync to Pixel")
                                 .font(.system(size: 14, weight: .semibold))
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(.blue)
+                    .tint(isLocked ? .orange : .blue)
                     .disabled(!canSync)
                 }
             }

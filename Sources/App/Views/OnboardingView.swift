@@ -195,24 +195,46 @@ public struct OnboardingView: View {
 
             // Live Detection Card
             if let phone = orchestrator.connectedIPhone {
-                HStack(spacing: 16) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 36))
-                        .foregroundColor(.green)
+                if phone.isLocked {
+                    HStack(spacing: 16) {
+                        Image(systemName: "lock.circle.fill")
+                            .font(.system(size: 36))
+                            .foregroundColor(.orange)
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Connected: \(phone.name)")
-                            .font(.headline)
-                        Text("\(phone.totalMediaCount) photos & videos detected • Ready for backup")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Connected: \(phone.name)")
+                                .font(.headline)
+                            Text("Passcode Locked • Unlock your iPhone screen with Face ID / passcode and tap 'Trust This Computer' to access photos.")
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                        }
+                        Spacer()
                     }
-                    Spacer()
+                    .padding(20)
+                    .background(Color.orange.opacity(0.1))
+                    .cornerRadius(14)
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.orange.opacity(0.3), lineWidth: 1))
+                } else {
+                    HStack(spacing: 16) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 36))
+                            .foregroundColor(.green)
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Connected: \(phone.name)")
+                                .font(.headline)
+                            let statusText = orchestrator.isCatalogComplete ? "\(phone.totalMediaCount) photos & videos detected • Ready for backup" : "Reading camera roll... (\(phone.totalMediaCount) detected)"
+                            Text(statusText)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                    }
+                    .padding(20)
+                    .background(Color.green.opacity(0.1))
+                    .cornerRadius(14)
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.green.opacity(0.3), lineWidth: 1))
                 }
-                .padding(20)
-                .background(Color.green.opacity(0.1))
-                .cornerRadius(14)
-                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.green.opacity(0.3), lineWidth: 1))
             } else {
                 VStack(spacing: 14) {
                     HStack(spacing: 10) {

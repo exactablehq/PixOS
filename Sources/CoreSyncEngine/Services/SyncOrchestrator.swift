@@ -28,6 +28,7 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
     @Published public var pendingQueue: [MediaItem] = []
     @Published public var syncedInSession: [MediaItem] = []
     @Published public var lastErrorMessage: String? = nil
+    @Published public var isCatalogComplete: Bool = false
 
     public var connectedIPhone: ConnectedIPhone? {
         if let id = selectedIPhoneId {
@@ -75,6 +76,34 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
                 self?.recalculatePendingQueue()
             }
         }
+
+        imageCaptureManager.onCatalogCompleted = { [weak self] in
+            DispatchQueue.main.async {
+                self?.isCatalogComplete = true
+                self?.recalculatePendingQueue()
+            }
+        }
+    }
+
+    public func refreshIPhone() {
+        isCatalogComplete = false
+        imageCaptureManager.refreshActiveCamera()
+    }
+
+    public func waitForMedia(timeout: TimeInterval = 10.0) async -> Bool {
+        let start = Date()
+        while Date().timeIntervalSince(start) < timeout {
+            if let phone = connectedIPhone, !phone.isLocked {
+                if isCatalogComplete && !allDiscoveredMedia.isEmpty {
+                    return true
+                }
+                if !allDiscoveredMedia.isEmpty && Date().timeIntervalSince(start) >= 2.5 {
+                    return true
+                }
+            }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+        return !allDiscoveredMedia.isEmpty
     }
 
     public func selectSourceIPhone(id: String) {
