@@ -139,6 +139,7 @@ public struct SyncConfiguration: Sendable, Equatable {
     public var targetPixelPath: String
     public var customADBPath: String?
     public var safeFreeStorageThresholdBytes: Int64
+    public var concurrentStreams: Int
 
     public init(
         batchSizeLimitBytes: Int64 = 5 * 1024 * 1024 * 1024, // 5 GB
@@ -147,7 +148,8 @@ public struct SyncConfiguration: Sendable, Equatable {
         includeVideos: Bool = true,
         targetPixelPath: String = "/sdcard/DCIM/iPhone",
         customADBPath: String? = nil,
-        safeFreeStorageThresholdBytes: Int64 = 2 * 1024 * 1024 * 1024 // 2 GB
+        safeFreeStorageThresholdBytes: Int64 = 2 * 1024 * 1024 * 1024, // 2 GB
+        concurrentStreams: Int = 4
     ) {
         self.batchSizeLimitBytes = batchSizeLimitBytes
         self.combineLivePhotos = combineLivePhotos
@@ -156,6 +158,7 @@ public struct SyncConfiguration: Sendable, Equatable {
         self.targetPixelPath = targetPixelPath
         self.customADBPath = customADBPath
         self.safeFreeStorageThresholdBytes = safeFreeStorageThresholdBytes
+        self.concurrentStreams = max(1, min(8, concurrentStreams))
     }
 }
 
@@ -170,6 +173,7 @@ public struct SyncProgress: Sendable, Equatable {
     public var speedBytesPerSecond: Double
     public var statusDescription: String
     public var isPausedForStorage: Bool
+    public var estimatedTimeRemainingSeconds: TimeInterval?
 
     public init(
         currentItem: String = "",
@@ -181,7 +185,8 @@ public struct SyncProgress: Sendable, Equatable {
         totalBatches: Int = 0,
         speedBytesPerSecond: Double = 0,
         statusDescription: String = "Ready",
-        isPausedForStorage: Bool = false
+        isPausedForStorage: Bool = false,
+        estimatedTimeRemainingSeconds: TimeInterval? = nil
     ) {
         self.currentItem = currentItem
         self.currentItemIndex = currentItemIndex
@@ -193,6 +198,7 @@ public struct SyncProgress: Sendable, Equatable {
         self.speedBytesPerSecond = speedBytesPerSecond
         self.statusDescription = statusDescription
         self.isPausedForStorage = isPausedForStorage
+        self.estimatedTimeRemainingSeconds = estimatedTimeRemainingSeconds
     }
 
     public var fractionCompleted: Double {
@@ -204,5 +210,19 @@ public struct SyncProgress: Sendable, Equatable {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
         return "\(formatter.string(fromByteCount: Int64(speedBytesPerSecond)))/s"
+    }
+
+    public var formattedETA: String {
+        guard let seconds = estimatedTimeRemainingSeconds, seconds > 0, seconds.isFinite else {
+            return ""
+        }
+        let total = Int(seconds)
+        let hrs = total / 3600
+        let mins = (total % 3600) / 60
+        if hrs > 0 {
+            return "\(hrs)h \(mins)m remaining"
+        } else {
+            return "\(max(1, mins))m remaining"
+        }
     }
 }

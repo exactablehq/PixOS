@@ -44,7 +44,7 @@ If you own an iPhone and are tired of paying Apple $36 to $360 every year for ex
 
 ## 🚀 Quick Start (Download App)
 
-1. Download the latest **`PixOS-1.4.0.dmg`** from [Releases](https://github.com/exactablehq/PixOS/releases).
+1. Download the latest **`PixOS-1.5.0.dmg`** from [Releases](https://github.com/exactablehq/PixOS/releases).
 2. Open the DMG and drag **`PixOS.app`** to your **`/Applications`** folder.
 3. Launch PixOS:
    - **Zero-Click CLI Setup**: PixOS automatically installs `pixos` and `adb` command line tools to your system PATH during initial onboarding.

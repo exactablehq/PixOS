@@ -35,6 +35,7 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
     @Published public var totalICloudBytesFreed: Int64 = 0
     @Published public var lastErrorMessage: String? = nil
     @Published public var isCatalogComplete: Bool = false
+    @Published public var skippedFailedItems: [MediaItem] = []
 
     public var connectedIPhone: ConnectedIPhone? {
         if let id = selectedIPhoneId {
@@ -325,7 +326,19 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
 
         var overallTransferredBytes: Int64 = 0
         var itemCounter = 0
-        let startTime = Date()
+        var recentTransfers: [(date: Date, bytes: Int64)] = []
+        let concurrency = max(1, min(8, config.concurrentStreams))
+        var prefetchTasks: [String: Task<(primaryURL: URL, companionVideoURL: URL?), Error>] = [:]
+
+        func spawnPrefetch(for itm: MediaItem) {
+            guard selectedSourceType == .icloudPhotos else { return }
+            let id = itm.id
+            guard prefetchTasks[id] == nil else { return }
+            prefetchTasks[id] = Task.detached(priority: .userInitiated) { [weak self] in
+                guard let self = self else { throw PhotoKitError.resourceNotFound }
+                return try await self.photoKitManager.downloadAssetWithRetry(id: id, to: stagingDir, timeout: 60.0, maxRetries: 3)
+            }
+        }
 
         for (bIndex, batch) in batches.enumerated() {
             if isCancelled { break }
@@ -355,10 +368,22 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
                 return
             }
 
+            // Prime the concurrent prefetch queue for the batch
+            if selectedSourceType == .icloudPhotos {
+                for itm in batch.prefix(concurrency) {
+                    spawnPrefetch(for: itm)
+                }
+            }
+
             // Process each item in batch
-            for item in batch {
+            for (idx, item) in batch.enumerated() {
                 if isCancelled { break }
                 itemCounter += 1
+
+                // Stream ahead: start prefetching the next item concurrently from iCloud
+                if selectedSourceType == .icloudPhotos && idx + concurrency < batch.count {
+                    spawnPrefetch(for: batch[idx + concurrency])
+                }
 
                 // Check Mac available disk space to protect user's SSD
                 let macFree = PhotoKitSourceManager.getMacFreeDiskBytes()
@@ -382,104 +407,129 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
                     self.progress.statusDescription = "Staging \(currentItemName)..."
                 }
 
-                // Download primary file and companion video to staging
-                var stagedPrimaryURL: URL
-                var stagedVideoURL: URL? = nil
-                var isMotionPhoto = false
+                do {
+                    // Download primary file and companion video to staging
+                    var stagedPrimaryURL: URL
+                    var stagedVideoURL: URL? = nil
+                    var isMotionPhoto = false
 
-                if selectedSourceType == .icloudPhotos {
-                    await MainActor.run {
-                        self.progress.statusDescription = "Streaming \(item.filename) from iCloud..."
-                    }
-                    let res = try await photoKitManager.downloadAsset(id: item.id, to: stagingDir) { progressFraction in
-                        let pct = Int(progressFraction * 100)
-                        DispatchQueue.main.async {
-                            self.progress.statusDescription = "Streaming \(item.filename) from iCloud (\(pct)%)..."
+                    if selectedSourceType == .icloudPhotos {
+                        let task = prefetchTasks.removeValue(forKey: item.id) ?? Task.detached(priority: .userInitiated) { [weak self] in
+                            guard let self = self else { throw PhotoKitError.resourceNotFound }
+                            return try await self.photoKitManager.downloadAssetWithRetry(id: item.id, to: stagingDir, timeout: 60.0, maxRetries: 3)
                         }
-                    }
-                    stagedPrimaryURL = res.primaryURL
-                    stagedVideoURL = res.companionVideoURL
-                } else {
-                    stagedPrimaryURL = try await imageCaptureManager.downloadFile(named: item.filename, to: stagingDir)
-                    if item.isLivePhoto && config.combineLivePhotos, let companionName = item.companionVideoName {
-                        stagedVideoURL = try? await imageCaptureManager.downloadFile(named: companionName, to: stagingDir)
-                    }
-                }
 
-                var fileToPush = stagedPrimaryURL
-
-                // Handle Live Photo combination
-                if item.isLivePhoto && config.combineLivePhotos, let companionURL = stagedVideoURL {
-                    await MainActor.run {
-                        self.progress.statusDescription = "Packaging Live Photo for \(item.filename)..."
-                    }
-                    let motionURL = stagingDir.appendingPathComponent("MOTION_\(item.filename)")
-                    if (try? MotionPhotoBuilder.buildMotionPhoto(imageURL: stagedPrimaryURL, videoURL: companionURL, outputURL: motionURL)) != nil {
-                        fileToPush = motionURL
-                        isMotionPhoto = true
-                        try? FileManager.default.removeItem(at: companionURL)
+                        let res = try await task.value
+                        stagedPrimaryURL = res.primaryURL
+                        stagedVideoURL = res.companionVideoURL
                     } else {
-                        // If motion builder fails, also push companion video side-by-side
-                        let companionRemoteName = companionURL.lastPathComponent
-                        let companionRemotePath = "\(targetDir)/\(companionRemoteName)"
-                        try await adbClient.push(localURL: companionURL, remotePath: companionRemotePath, serial: pixel.serial)
-                        if let creationDate = item.creationDate {
-                            await adbClient.setRemoteTimestamp(remotePath: companionRemotePath, date: creationDate, serial: pixel.serial)
+                        stagedPrimaryURL = try await imageCaptureManager.downloadFile(named: item.filename, to: stagingDir)
+                        if item.isLivePhoto && config.combineLivePhotos, let companionName = item.companionVideoName {
+                            stagedVideoURL = try? await imageCaptureManager.downloadFile(named: companionName, to: stagingDir)
                         }
-                        try? await adbClient.triggerMediaScan(remotePath: companionRemotePath, serial: pixel.serial)
-                        try? FileManager.default.removeItem(at: companionURL)
                     }
-                }
 
-                // Push to Pixel
-                await MainActor.run {
-                    self.progress.statusDescription = "Transferring \(item.filename) to Pixel..."
-                }
+                    var fileToPush = stagedPrimaryURL
 
-                let remoteDest = "\(targetDir)/\(item.filename)"
-                try await adbClient.push(localURL: fileToPush, remotePath: remoteDest, serial: pixel.serial)
-
-                // Preserve original creation timestamp on Android filesystem so Google Photos sorts perfectly
-                if let creationDate = item.creationDate {
-                    await adbClient.setRemoteTimestamp(remotePath: remoteDest, date: creationDate, serial: pixel.serial)
-                }
-
-                // Trigger Android MediaScanner
-                try await adbClient.triggerMediaScan(remotePath: remoteDest, serial: pixel.serial)
-
-                // Record into database
-                database.recordSynced(
-                    fingerprint: item.fingerprint,
-                    filename: item.filename,
-                    fileSize: item.fileSize,
-                    mediaType: item.mediaType.rawValue,
-                    creationDate: item.creationDate,
-                    pixelPath: remoteDest,
-                    isMotionPhoto: isMotionPhoto
-                )
-
-                // Clean up Mac staging copy immediately to keep disk footprint minimal
-                try? FileManager.default.removeItem(at: stagedPrimaryURL)
-                if fileToPush != stagedPrimaryURL {
-                    try? FileManager.default.removeItem(at: fileToPush)
-                }
-                if let companion = stagedVideoURL {
-                    try? FileManager.default.removeItem(at: companion)
-                }
-
-                overallTransferredBytes += item.fileSize
-                let elapsed = Date().timeIntervalSince(startTime)
-                let speed = elapsed > 0 ? Double(overallTransferredBytes) / elapsed : 0
-
-                let bytesDone = overallTransferredBytes
-                let currentItem = item
-                await MainActor.run {
-                    self.progress.bytesTransferred = bytesDone
-                    self.progress.speedBytesPerSecond = speed
-                    self.syncedInSession.append(currentItem)
-                    if !self.triageQueue.contains(where: { $0.id == currentItem.id }) {
-                        self.triageQueue.append(currentItem)
+                    // Handle Live Photo combination
+                    if item.isLivePhoto && config.combineLivePhotos, let companionURL = stagedVideoURL {
+                        await MainActor.run {
+                            self.progress.statusDescription = "Packaging Live Photo for \(item.filename)..."
+                        }
+                        let motionURL = stagingDir.appendingPathComponent("MOTION_\(item.filename)")
+                        if (try? MotionPhotoBuilder.buildMotionPhoto(imageURL: stagedPrimaryURL, videoURL: companionURL, outputURL: motionURL)) != nil {
+                            fileToPush = motionURL
+                            isMotionPhoto = true
+                            try? FileManager.default.removeItem(at: companionURL)
+                        } else {
+                            // If motion builder fails, also push companion video side-by-side
+                            let companionRemoteName = companionURL.lastPathComponent
+                            let companionRemotePath = "\(targetDir)/\(companionRemoteName)"
+                            try await adbClient.push(localURL: companionURL, remotePath: companionRemotePath, serial: pixel.serial)
+                            if let creationDate = item.creationDate {
+                                await adbClient.setRemoteTimestamp(remotePath: companionRemotePath, date: creationDate, serial: pixel.serial)
+                            }
+                            Task.detached { [adb = self.adbClient, serial = pixel.serial] in
+                                try? await adb.triggerMediaScan(remotePath: companionRemotePath, serial: serial)
+                            }
+                            try? FileManager.default.removeItem(at: companionURL)
+                        }
                     }
+
+                    // Push to Pixel
+                    await MainActor.run {
+                        self.progress.statusDescription = "Transferring \(item.filename) to Pixel..."
+                    }
+
+                    let remoteDest = "\(targetDir)/\(item.filename)"
+                    try await adbClient.push(localURL: fileToPush, remotePath: remoteDest, serial: pixel.serial)
+
+                    // Preserve original creation timestamp on Android filesystem so Google Photos sorts perfectly
+                    if let creationDate = item.creationDate {
+                        await adbClient.setRemoteTimestamp(remotePath: remoteDest, date: creationDate, serial: pixel.serial)
+                    }
+
+                    // Trigger Android MediaScanner asynchronously to avoid blocking the transfer pipeline
+                    Task.detached { [adb = self.adbClient, serial = pixel.serial] in
+                        try? await adb.triggerMediaScan(remotePath: remoteDest, serial: serial)
+                    }
+
+                    // Record into database
+                    database.recordSynced(
+                        fingerprint: item.fingerprint,
+                        filename: item.filename,
+                        fileSize: item.fileSize,
+                        mediaType: item.mediaType.rawValue,
+                        creationDate: item.creationDate,
+                        pixelPath: remoteDest,
+                        isMotionPhoto: isMotionPhoto
+                    )
+
+                    // Clean up Mac staging copy immediately to keep disk footprint minimal
+                    try? FileManager.default.removeItem(at: stagedPrimaryURL)
+                    if fileToPush != stagedPrimaryURL {
+                        try? FileManager.default.removeItem(at: fileToPush)
+                    }
+                    if let companion = stagedVideoURL {
+                        try? FileManager.default.removeItem(at: companion)
+                    }
+
+                    overallTransferredBytes += item.fileSize
+
+                    // Calculate rolling 15-second speed and dynamic ETA
+                    let now = Date()
+                    recentTransfers.append((date: now, bytes: item.fileSize))
+                    let cutoff = now.addingTimeInterval(-15.0)
+                    recentTransfers.removeAll(where: { $0.date < cutoff })
+
+                    let recentBytes = recentTransfers.reduce(0) { $0 + $1.bytes }
+                    let windowDuration = max(1.0, now.timeIntervalSince(recentTransfers.first?.date ?? now))
+                    let rollingSpeed = Double(recentBytes) / windowDuration
+                    let remainingBytes = max(0, totalBytes - overallTransferredBytes)
+                    let eta = rollingSpeed > 1024 ? Double(remainingBytes) / rollingSpeed : nil
+
+                    let bytesDone = overallTransferredBytes
+                    let currentItem = item
+                    await MainActor.run {
+                        self.progress.bytesTransferred = bytesDone
+                        self.progress.speedBytesPerSecond = rollingSpeed
+                        self.progress.estimatedTimeRemainingSeconds = eta
+                        self.syncedInSession.append(currentItem)
+                        if !self.triageQueue.contains(where: { $0.id == currentItem.id }) {
+                            self.triageQueue.append(currentItem)
+                        }
+                    }
+                } catch {
+                    // Item error isolation: record to skippedFailedItems, clean staging, and continue seamlessly
+                    print("⚠️ Skipped item \(item.filename) due to error: \(error.localizedDescription)")
+                    let failedItem = item
+                    await MainActor.run {
+                        self.skippedFailedItems.append(failedItem)
+                        self.lastErrorMessage = "Skipped \(failedItem.filename): \(error.localizedDescription)"
+                    }
+                    let p = stagingDir.appendingPathComponent(item.filename)
+                    try? FileManager.default.removeItem(at: p)
+                    continue
                 }
             }
         }
@@ -571,5 +621,12 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
     public func resetSyncDatabase() {
         database.clearAll()
         recalculatePendingQueue()
+    }
+
+    public func retryFailedItems() {
+        guard !skippedFailedItems.isEmpty else { return }
+        let toRetry = skippedFailedItems
+        skippedFailedItems.removeAll()
+        pendingQueue = toRetry + pendingQueue
     }
 }

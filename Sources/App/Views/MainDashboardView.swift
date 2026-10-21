@@ -688,6 +688,22 @@ public struct MainDashboardView: View {
                 .pickerStyle(.menu)
             }
 
+            // Concurrency Streams
+            VStack(alignment: .leading, spacing: 6) {
+                Text("iCloud Streams")
+                    .font(.caption.bold())
+                    .foregroundColor(.secondary)
+
+                Picker("Streams", selection: $orchestrator.config.concurrentStreams) {
+                    Text("1x (Sequential)").tag(1)
+                    Text("2x").tag(2)
+                    Text("4x (Balanced)").tag(4)
+                    Text("6x (Fast)").tag(6)
+                    Text("8x (Max Speed)").tag(8)
+                }
+                .pickerStyle(.menu)
+            }
+
             Divider()
 
             // Live Photos Toggle
@@ -902,7 +918,10 @@ public struct MainDashboardView: View {
                         Text(orchestrator.progress.statusDescription)
                             .font(.system(size: 12, weight: .medium))
                         Spacer()
-                        Text("\(orchestrator.progress.currentItemIndex) / \(orchestrator.progress.totalItems) (\(orchestrator.progress.formattedSpeed))")
+                        let speedText = orchestrator.progress.formattedSpeed
+                        let etaText = orchestrator.progress.formattedETA
+                        let metrics = etaText.isEmpty ? speedText : "\(speedText) • \(etaText)"
+                        Text("\(orchestrator.progress.currentItemIndex) / \(orchestrator.progress.totalItems) (\(metrics))")
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(.secondary)
                     }
@@ -910,6 +929,25 @@ public struct MainDashboardView: View {
                     ProgressView(value: orchestrator.progress.fractionCompleted)
                         .tint(.blue)
                 }
+            }
+
+            if !orchestrator.skippedFailedItems.isEmpty && orchestrator.state != .syncing {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                    Text("\(orchestrator.skippedFailedItems.count) items skipped due to network/timeout.")
+                        .font(.caption)
+                    Spacer()
+                    Button("Retry Skipped Items") {
+                        orchestrator.retryFailedItems()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.orange.opacity(0.12))
+                .cornerRadius(8)
             }
 
             HStack {

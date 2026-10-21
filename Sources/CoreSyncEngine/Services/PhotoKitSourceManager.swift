@@ -7,6 +7,7 @@ public enum PhotoKitError: LocalizedError, Sendable {
     case assetNotFound
     case resourceNotFound
     case writeFailed(String)
+    case downloadTimedOut
 
     public var errorDescription: String? {
         switch self {
@@ -18,6 +19,8 @@ public enum PhotoKitError: LocalizedError, Sendable {
             return "Could not find valid photo or video resource for asset."
         case .writeFailed(let message):
             return "Failed to download asset from iCloud/Photos: \(message)"
+        case .downloadTimedOut:
+            return "iCloud download timed out (exceeded 60s without response from Apple servers)."
         }
     }
 }
@@ -284,6 +287,52 @@ public final class PhotoKitSourceManager: NSObject, ObservableObject, PHPhotoLib
     /// If the item is in iCloud, `isNetworkAccessAllowed = true` triggers Apple's background iCloud streaming download.
     /// Prioritizes current adjusted/edited media if present, falling back to original camera capture.
     public func downloadAsset(
+        id: String,
+        to stagingDir: URL,
+        timeout: TimeInterval = 60.0,
+        onProgress: ((Double) -> Void)? = nil
+    ) async throws -> (primaryURL: URL, companionVideoURL: URL?) {
+        try await withThrowingTaskGroup(of: (URL, URL?).self) { group in
+            group.addTask {
+                try await self.performDownload(id: id, to: stagingDir, onProgress: onProgress)
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                throw PhotoKitError.downloadTimedOut
+            }
+
+            guard let firstCompleted = try await group.next() else {
+                throw PhotoKitError.downloadTimedOut
+            }
+            group.cancelAll()
+            return firstCompleted
+        }
+    }
+
+    /// Retries downloading up to maxRetries attempts with exponential backoff
+    public func downloadAssetWithRetry(
+        id: String,
+        to stagingDir: URL,
+        timeout: TimeInterval = 60.0,
+        maxRetries: Int = 3,
+        onProgress: ((Double) -> Void)? = nil
+    ) async throws -> (primaryURL: URL, companionVideoURL: URL?) {
+        var lastError: Error = PhotoKitError.resourceNotFound
+        for attempt in 1...maxRetries {
+            do {
+                return try await downloadAsset(id: id, to: stagingDir, timeout: timeout, onProgress: onProgress)
+            } catch {
+                lastError = error
+                if attempt < maxRetries {
+                    let backoff = Double(attempt * 2)
+                    try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
+                }
+            }
+        }
+        throw lastError
+    }
+
+    private func performDownload(
         id: String,
         to stagingDir: URL,
         onProgress: ((Double) -> Void)? = nil

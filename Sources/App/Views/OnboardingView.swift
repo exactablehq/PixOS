@@ -142,7 +142,7 @@ public struct OnboardingView: View {
                 )
 
             VStack(spacing: 6) {
-                Text("PixOS v1.4.0 Master Guide")
+                Text("PixOS v1.5.0 Master Guide")
                     .font(.system(size: 24, weight: .bold, design: .rounded))
                 Text("Bypass iCloud storage fees forever using Google Pixel's lifetime free unlimited original quality backup.")
                     .font(.subheadline)
