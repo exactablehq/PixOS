@@ -9,17 +9,18 @@ public final class DashboardViewModel: ObservableObject {
     @Published public var selectedFilter: String = "All"
     @Published public var pairingVM: PairingViewModel = PairingViewModel()
     @Published public var swipeCleanVM: SwipeCleanViewModel = SwipeCleanViewModel()
+    @Published public var onboardingVM: OnboardingViewModel = OnboardingViewModel()
 
     public init() {}
 }
 
 public struct MainDashboardView: View {
     @ObservedObject var orchestrator: SyncOrchestrator
-    @ObservedObject var vm: DashboardViewModel
+    @StateObject private var vm: DashboardViewModel
 
     public init(orchestrator: SyncOrchestrator, vm: DashboardViewModel? = nil) {
         self.orchestrator = orchestrator
-        self.vm = vm ?? DashboardViewModel()
+        self._vm = StateObject(wrappedValue: vm ?? DashboardViewModel())
     }
 
     public var body: some View {
@@ -77,7 +78,7 @@ public struct MainDashboardView: View {
                     .ignoresSafeArea()
                     .onTapGesture { vm.showingOnboarding = false }
 
-                OnboardingView(orchestrator: orchestrator, onDismiss: { vm.showingOnboarding = false })
+                OnboardingView(orchestrator: orchestrator, vm: vm.onboardingVM, onDismiss: { vm.showingOnboarding = false })
                     .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
                     .cornerRadius(16)
                     .shadow(radius: 20)

@@ -6,6 +6,7 @@ public final class OnboardingViewModel: ObservableObject {
     @Published public var cliInstallStatus: String = "Installing CLI & Platform Tools..."
     @Published public var isCLIInstalled: Bool = false
     @Published public var pairingVM: PairingViewModel = PairingViewModel()
+    @Published public var databaseResetMessage: String? = nil
 
     public init() {
         performCLIInstall()
@@ -40,6 +41,16 @@ public struct OnboardingView: View {
                 stepTab(step: 3, label: "iPhone (USB)", icon: "iphone.gen3")
                 stepTab(step: 4, label: "Google Pixel", icon: "candybarphone")
                 stepTab(step: 5, label: "Metadata & Cleaner", icon: "hand.draw.fill")
+
+                Spacer()
+
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Close Guide")
             }
             .padding(.top, 16)
             .padding(.horizontal, 20)
@@ -131,7 +142,7 @@ public struct OnboardingView: View {
                 )
 
             VStack(spacing: 6) {
-                Text("PixOS v1.3.0 Master Guide")
+                Text("PixOS v1.4.0 Master Guide")
                     .font(.system(size: 24, weight: .bold, design: .rounded))
                 Text("Bypass iCloud storage fees forever using Google Pixel's lifetime free unlimited original quality backup.")
                     .font(.subheadline)
@@ -350,21 +361,22 @@ public struct OnboardingView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Database Management")
                         .font(.caption.bold())
-                    Text("Want to start over as if no items were synced? Reset sync history below.")
+                    Text(vm.databaseResetMessage ?? "Want to start over as if no items were synced? Reset sync history below.")
                         .font(.caption2)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(vm.databaseResetMessage != nil ? .green : .secondary)
                 }
                 Spacer()
-                Button("Reset Sync History") {
+                Button(vm.databaseResetMessage != nil ? "Cleared ✔" : "Reset Sync History") {
                     orchestrator.resetSyncDatabase()
+                    vm.databaseResetMessage = "✔ All records cleared! Database is clean (0 items synced)."
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
             }
             .padding(12)
-            .background(Color.red.opacity(0.06))
+            .background(vm.databaseResetMessage != nil ? Color.green.opacity(0.08) : Color.red.opacity(0.06))
             .cornerRadius(10)
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.red.opacity(0.2), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(vm.databaseResetMessage != nil ? Color.green.opacity(0.3) : Color.red.opacity(0.2), lineWidth: 1))
         }
     }
 

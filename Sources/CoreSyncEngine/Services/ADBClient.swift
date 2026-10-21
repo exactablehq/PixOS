@@ -40,6 +40,11 @@ public final class ADBClient: Sendable {
         adbPath != nil
     }
 
+    private static func shellQuote(_ path: String) -> String {
+        let escaped = path.replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    }
+
     public func run(arguments: [String], timeout: TimeInterval = 60) async throws -> (stdout: String, stderr: String, exitCode: Int32) {
         guard let adb = adbPath else {
             throw ADBError.adbNotFound
@@ -62,10 +67,39 @@ public final class ADBClient: Sendable {
                 return
             }
 
+            // Watchdog timer to kill hanging ADB process if timeout is exceeded
+            let timeoutWorkItem = DispatchWorkItem {
+                if process.isRunning {
+                    process.terminate()
+                }
+            }
+            DispatchQueue.global(qos: .background).asyncAfter(
+                deadline: .now() + timeout,
+                execute: timeoutWorkItem
+            )
+
             DispatchQueue.global(qos: .userInitiated).async {
+                // Concurrently drain stdout and stderr to prevent pipe buffer deadlock
+                var outData = Data()
+                var errData = Data()
+                let group = DispatchGroup()
+
+                group.enter()
+                DispatchQueue.global(qos: .userInitiated).async {
+                    outData = outPipe.fileHandleForReading.readDataToEndOfFile()
+                    group.leave()
+                }
+
+                group.enter()
+                DispatchQueue.global(qos: .userInitiated).async {
+                    errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+                    group.leave()
+                }
+
                 process.waitUntilExit()
-                let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-                let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+                group.wait()
+                timeoutWorkItem.cancel()
+
                 let stdout = String(data: outData, encoding: .utf8) ?? ""
                 let stderr = String(data: errData, encoding: .utf8) ?? ""
                 continuation.resume(returning: (stdout, stderr, process.terminationStatus))
@@ -133,8 +167,6 @@ public final class ADBClient: Sendable {
         for line in lines.dropFirst() {
             let tokens = line.split(whereSeparator: { $0.isWhitespace }).map(String.init)
             if tokens.count >= 4 {
-                // Tokens usually: Filesystem 1K-blocks Used Available Use% Mounted on
-                // Sometimes: /dev/block/vold/... 28833792 5123992 23709800 18% /sdcard
                 if let total1k = Int64(tokens[1]),
                    let used1k = Int64(tokens[2]),
                    let free1k = Int64(tokens[3]) {
@@ -151,7 +183,7 @@ public final class ADBClient: Sendable {
     }
 
     public func createDirectory(remotePath: String, serial: String? = nil) async throws {
-        var args = ["shell", "mkdir", "-p", remotePath]
+        var args = ["shell", "mkdir", "-p", ADBClient.shellQuote(remotePath)]
         if let serial = serial {
             args = ["-s", serial] + args
         }
@@ -174,7 +206,7 @@ public final class ADBClient: Sendable {
     }
 
     public func verifyFileSize(remotePath: String, expectedBytes: Int64, serial: String? = nil) async throws -> Bool {
-        var args = ["shell", "stat", "-c", "%s", "\"\(remotePath)\""]
+        var args = ["shell", "stat", "-c", "%s", ADBClient.shellQuote(remotePath)]
         if let serial = serial {
             args = ["-s", serial] + args
         }
@@ -187,8 +219,8 @@ public final class ADBClient: Sendable {
             }
         }
 
-        // Fallback to ls -l if stat is not present
-        var lsArgs = ["shell", "ls", "-nl", "\"\(remotePath)\""]
+        // Fallback to ls -nl if stat is not present
+        var lsArgs = ["shell", "ls", "-nl", ADBClient.shellQuote(remotePath)]
         if let serial = serial {
             lsArgs = ["-s", serial] + lsArgs
         }
@@ -204,10 +236,11 @@ public final class ADBClient: Sendable {
     }
 
     public func triggerMediaScan(remotePath: String, serial: String? = nil) async throws {
+        let encodedPath = remotePath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? remotePath
         var args = [
             "shell", "am", "broadcast",
             "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
-            "-d", "file://\(remotePath)"
+            "-d", "file://\(encodedPath)"
         ]
         if let serial = serial {
             args = ["-s", serial] + args
@@ -222,7 +255,7 @@ public final class ADBClient: Sendable {
         formatter.dateFormat = "yyyyMMddHHmm.ss"
         let timestampStr = formatter.string(from: date)
 
-        var args = ["shell", "touch", "-t", timestampStr, "\"\(remotePath)\""]
+        var args = ["shell", "touch", "-t", timestampStr, ADBClient.shellQuote(remotePath)]
         if let serial = serial {
             args = ["-s", serial] + args
         }

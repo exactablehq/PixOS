@@ -81,7 +81,6 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
             guard let self = self, self.selectedSourceType == .usbIPhone else { return }
             DispatchQueue.main.async {
                 self.allDiscoveredMedia = items
-                self.recalculatePendingQueue()
             }
         }
 
@@ -97,7 +96,6 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
             guard let self = self, self.selectedSourceType == .icloudPhotos else { return }
             DispatchQueue.main.async {
                 self.allDiscoveredMedia = items
-                self.recalculatePendingQueue()
             }
         }
 

@@ -33,6 +33,9 @@ public final class PhotoKitSourceManager: NSObject, ObservableObject, PHPhotoLib
 
     private var catalogTask: Task<Void, Never>?
     private var isRegisteredObserver: Bool = false
+    private var isCatalogingInProgress: Bool = false
+    private var hasPendingChange: Bool = false
+    private var debounceTimer: DispatchWorkItem?
 
     public override init() {
         super.init()
@@ -44,15 +47,28 @@ public final class PhotoKitSourceManager: NSObject, ObservableObject, PHPhotoLib
     }
 
     deinit {
+        debounceTimer?.cancel()
         if isRegisteredObserver {
             PHPhotoLibrary.shared().unregisterChangeObserver(self)
         }
     }
 
     public func photoLibraryDidChange(_ changeInstance: PHChange) {
-        // Automatically re-index when iCloud Photos syncs new assets into the system library
+        // Automatically re-index when iCloud Photos syncs new assets into the system library,
+        // debounced to prevent rapid background iCloud sync commit storms from restarting scans.
         DispatchQueue.main.async { [weak self] in
-            self?.startCataloging()
+            guard let self = self else { return }
+            self.debounceTimer?.cancel()
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self = self else { return }
+                if self.isCatalogingInProgress {
+                    self.hasPendingChange = true
+                } else {
+                    self.startCataloging()
+                }
+            }
+            self.debounceTimer = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0, execute: workItem)
         }
     }
 
@@ -91,21 +107,30 @@ public final class PhotoKitSourceManager: NSObject, ObservableObject, PHPhotoLib
     }
 
     public func startCataloging() {
-        catalogTask?.cancel()
+        if isCatalogingInProgress {
+            hasPendingChange = true
+            return
+        }
+        isCatalogingInProgress = true
+        hasPendingChange = false
+
         catalogTask = Task.detached(priority: .userInitiated) { [weak self] in
             await self?.catalogLibrary()
         }
     }
 
     public func stopCataloging() {
+        debounceTimer?.cancel()
         catalogTask?.cancel()
         catalogTask = nil
+        isCatalogingInProgress = false
+        hasPendingChange = false
     }
 
     private func catalogLibrary() async {
         await MainActor.run {
             self.isCatalogComplete = false
-            self.catalogedMediaItems.removeAll()
+            // Note: Keep existing catalogedMediaItems in place to prevent UI flickering or reset to 0
         }
 
         var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
@@ -130,6 +155,7 @@ public final class PhotoKitSourceManager: NSObject, ObservableObject, PHPhotoLib
             await MainActor.run {
                 self.authorizationStatus = finalStatus
                 self.isCatalogComplete = true
+                self.isCatalogingInProgress = false
                 self.onCatalogCompleted?()
             }
             return
@@ -138,7 +164,6 @@ public final class PhotoKitSourceManager: NSObject, ObservableObject, PHPhotoLib
         let fetchOptions = PHFetchOptions()
         fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         fetchOptions.includeHiddenAssets = false
-        // Fetch all media items without restrictive source-type filters
 
         let fetchResult = PHAsset.fetchAssets(with: fetchOptions)
         let total = fetchResult.count
@@ -148,7 +173,7 @@ public final class PhotoKitSourceManager: NSObject, ObservableObject, PHPhotoLib
         }
 
         var items: [MediaItem] = []
-        items.reserveCapacity(min(total, 5000))
+        items.reserveCapacity(total)
         var lastBatchDispatch = Date()
 
         for i in 0..<total {
@@ -158,15 +183,14 @@ public final class PhotoKitSourceManager: NSObject, ObservableObject, PHPhotoLib
             let item = makeMediaItem(from: asset)
             items.append(item)
 
-            // Stream updates to UI in batches of 200 or every 0.5s so 80,000 items don't freeze the main thread
-            if items.count % 250 == 0 || Date().timeIntervalSince(lastBatchDispatch) > 0.5 {
+            // Stream updates to UI in batches of 500 or every 0.5s so UI stays responsive
+            if items.count % 500 == 0 || Date().timeIntervalSince(lastBatchDispatch) > 0.5 {
                 let currentBatch = items
                 await MainActor.run {
                     self.catalogedMediaItems = currentBatch
                     self.onMediaItemsLoaded?(currentBatch)
                 }
                 lastBatchDispatch = Date()
-                // Yield to allow UI updates and prevent saturating GCD
                 await Task.yield()
             }
         }
@@ -175,8 +199,14 @@ public final class PhotoKitSourceManager: NSObject, ObservableObject, PHPhotoLib
         await MainActor.run {
             self.catalogedMediaItems = finalItems
             self.isCatalogComplete = true
+            self.isCatalogingInProgress = false
             self.onMediaItemsLoaded?(finalItems)
             self.onCatalogCompleted?()
+
+            if self.hasPendingChange {
+                self.hasPendingChange = false
+                self.startCataloging()
+            }
         }
     }
 
@@ -185,68 +215,57 @@ public final class PhotoKitSourceManager: NSObject, ObservableObject, PHPhotoLib
         let creationDate = asset.creationDate
         let modificationDate = asset.modificationDate
 
-        let resources = PHAssetResource.assetResources(for: asset)
-
-        var primaryFilename: String?
-        var companionFilename: String?
-        var totalBytes: Int64 = 0
-        var isLive = false
-
         let isLiveSubtype = asset.mediaSubtypes.contains(.photoLive)
+        let isScreenshot = asset.mediaSubtypes.contains(.photoScreenshot)
+        let isScreenRecording = asset.mediaSubtypes.contains(PHAssetMediaSubtype(rawValue: 1 << 19))
+        let isVideo = asset.mediaType == .video
+
+        // Fast in-memory metadata extraction without expensive IPC PHAssetResource calls
+        let baseFilename = asset.value(forKey: "filename") as? String
+
+        let mediaType: MediaType
+        var companionFilename: String? = nil
+        let isLive: Bool
 
         if isLiveSubtype {
             isLive = true
-            let photoRes = resources.first(where: { $0.type == .fullSizePhoto }) ?? resources.first(where: { $0.type == .photo })
-            let videoRes = resources.first(where: { $0.type == .fullSizePairedVideo }) ?? resources.first(where: { $0.type == .pairedVideo })
-
-            primaryFilename = photoRes?.originalFilename
-            companionFilename = videoRes?.originalFilename
-
-            let photoSize = (photoRes?.value(forKey: "fileSize") as? NSNumber)?.int64Value ?? 0
-            let videoSize = (videoRes?.value(forKey: "fileSize") as? NSNumber)?.int64Value ?? 0
-            totalBytes = photoSize + videoSize
-        } else if asset.mediaType == .video {
-            let videoRes = resources.first(where: { $0.type == .fullSizeVideo }) ?? resources.first(where: { $0.type == .video }) ?? resources.first
-            primaryFilename = videoRes?.originalFilename
-            totalBytes = (videoRes?.value(forKey: "fileSize") as? NSNumber)?.int64Value ?? 0
-        } else {
-            let photoRes = resources.first(where: { $0.type == .fullSizePhoto }) ?? resources.first(where: { $0.type == .photo }) ?? resources.first
-            primaryFilename = photoRes?.originalFilename
-            totalBytes = (photoRes?.value(forKey: "fileSize") as? NSNumber)?.int64Value ?? 0
-        }
-
-        // Fallback filename if resource originalFilename is empty
-        let ext: String
-        if asset.mediaType == .video {
-            ext = "MOV"
-        } else {
-            ext = "HEIC"
-        }
-        let cleanId = id.prefix(8).replacingOccurrences(of: "/", with: "_")
-        let finalFilename = primaryFilename ?? "IMG_\(cleanId).\(ext)"
-
-        // Fallback estimate if fileSize metadata is 0
-        if totalBytes == 0 {
-            if asset.mediaType == .video {
-                let durationSec = max(1.0, asset.duration)
-                totalBytes = Int64(durationSec * 2_500_000) // ~2.5 MB/s
-            } else {
-                let pixels = max(1, asset.pixelWidth * asset.pixelHeight)
-                totalBytes = Int64(max(1_500_000, pixels / 4)) // ~2-4 MB estimate
-            }
-        }
-
-        let mediaType: MediaType
-        if isLive {
             mediaType = .livePhoto
-        } else if asset.mediaSubtypes.contains(.photoScreenshot) {
+        } else if isScreenshot {
+            isLive = false
             mediaType = .screenshot
-        } else if asset.mediaSubtypes.contains(PHAssetMediaSubtype(rawValue: 1 << 19)) {
+        } else if isScreenRecording {
+            isLive = false
             mediaType = .screenRecording
-        } else if asset.mediaType == .video {
+        } else if isVideo {
+            isLive = false
             mediaType = .video
         } else {
+            isLive = false
             mediaType = .photo
+        }
+
+        let ext = isVideo ? "MOV" : (isLive ? "HEIC" : "JPG")
+        let cleanId = id.prefix(8).replacingOccurrences(of: "/", with: "_")
+        let finalFilename = baseFilename ?? "IMG_\(cleanId).\(ext)"
+
+        if isLive {
+            let base = (finalFilename as NSString).deletingPathExtension
+            companionFilename = "\(base).MOV"
+        }
+
+        // Fast, deterministic file size calculation
+        let totalBytes: Int64
+        if isVideo {
+            let durationSec = max(1.0, asset.duration)
+            totalBytes = Int64(durationSec * 2_500_000) // ~2.5 MB/sec
+        } else if isLive {
+            let pixels = max(1, asset.pixelWidth * asset.pixelHeight)
+            let photoBytes = Int64(max(1_500_000, pixels / 4))
+            let videoBytes: Int64 = 3_000_000
+            totalBytes = photoBytes + videoBytes
+        } else {
+            let pixels = max(1, asset.pixelWidth * asset.pixelHeight)
+            totalBytes = Int64(max(1_500_000, pixels / 4))
         }
 
         return MediaItem(
