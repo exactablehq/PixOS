@@ -19,13 +19,29 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
 
     @Published public var state: SyncState = .idle
     @Published public var progress: SyncProgress = SyncProgress()
-    @Published public var connectedIPhone: ConnectedIPhone? = nil
-    @Published public var connectedPixel: AndroidDevice? = nil
+    @Published public var availableIPhones: [ConnectedIPhone] = []
+    @Published public var selectedIPhoneId: String? = nil
+    @Published public var availableAndroidDevices: [AndroidDevice] = []
+    @Published public var selectedPixelSerial: String? = nil
     @Published public var pixelStorage: StorageInfo? = nil
     @Published public var allDiscoveredMedia: [MediaItem] = []
     @Published public var pendingQueue: [MediaItem] = []
     @Published public var syncedInSession: [MediaItem] = []
     @Published public var lastErrorMessage: String? = nil
+
+    public var connectedIPhone: ConnectedIPhone? {
+        if let id = selectedIPhoneId {
+            return availableIPhones.first(where: { $0.id == id }) ?? availableIPhones.first
+        }
+        return availableIPhones.first
+    }
+
+    public var connectedPixel: AndroidDevice? {
+        if let serial = selectedPixelSerial {
+            return availableAndroidDevices.first(where: { $0.serial == serial }) ?? availableAndroidDevices.first
+        }
+        return availableAndroidDevices.first(where: { $0.isAuthorized }) ?? availableAndroidDevices.first
+    }
 
     private var isCancelled = false
     private var timer: Timer?
@@ -46,7 +62,10 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
     private func setupBindings() {
         imageCaptureManager.onDeviceListChanged = { [weak self] phones in
             DispatchQueue.main.async {
-                self?.connectedIPhone = phones.first
+                self?.availableIPhones = phones
+                if self?.selectedIPhoneId == nil || !phones.contains(where: { $0.id == self?.selectedIPhoneId }) {
+                    self?.selectedIPhoneId = phones.first?.id
+                }
             }
         }
 
@@ -54,6 +73,22 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
             DispatchQueue.main.async {
                 self?.allDiscoveredMedia = items
                 self?.recalculatePendingQueue()
+            }
+        }
+    }
+
+    public func selectSourceIPhone(id: String) {
+        selectedIPhoneId = id
+        imageCaptureManager.selectCamera(id: id)
+    }
+
+    public func selectTargetPixel(serial: String) {
+        selectedPixelSerial = serial
+        Task {
+            if let storage = try? await adbClient.getStorage(serial: serial) {
+                await MainActor.run {
+                    self.pixelStorage = storage
+                }
             }
         }
     }
@@ -76,15 +111,24 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
         Task {
             do {
                 let devices = try await adbClient.listDevices()
-                let pixel = devices.first(where: { $0.isAuthorized }) ?? devices.first
+                var currentSerial = self.selectedPixelSerial
+                if currentSerial == nil || !devices.contains(where: { $0.serial == currentSerial }) {
+                    currentSerial = devices.first(where: { $0.isAuthorized })?.serial ?? devices.first?.serial
+                }
+
                 var storage: StorageInfo? = nil
-                if let serial = pixel?.serial, pixel?.isAuthorized == true {
+                if let serial = currentSerial {
                     storage = try? await adbClient.getStorage(serial: serial)
                 }
-                let finalPixel = pixel
+
+                let finalDevices = devices
+                let finalSerial = currentSerial
                 let finalStorage = storage
                 await MainActor.run {
-                    self.connectedPixel = finalPixel
+                    self.availableAndroidDevices = finalDevices
+                    if self.selectedPixelSerial == nil {
+                        self.selectedPixelSerial = finalSerial
+                    }
                     self.pixelStorage = finalStorage
                 }
             } catch {

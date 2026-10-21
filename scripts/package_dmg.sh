@@ -10,7 +10,7 @@ bash "$SCRIPT_DIR/build_app.sh"
 
 DIST_DIR="$ROOT_DIR/dist"
 STAGING_DIR="$DIST_DIR/dmg_staging"
-DMG_PATH="$DIST_DIR/PixOS-1.0.0.dmg"
+DMG_PATH="$DIST_DIR/PixOS-1.1.0.dmg"
 
 rm -rf "$STAGING_DIR"
 rm -f "$DMG_PATH"

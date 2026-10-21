@@ -21,6 +21,7 @@ func printHelp() {
 
 \u{001B}[1mCOMMANDS:\u{001B}[0m
     \u{001B}[32mstatus\u{001B}[0m                  Display connected iPhone, Pixel, storage info & sync stats
+    \u{001B}[32mdevices\u{001B}[0m                 List all available source (iOS) and target (Android) devices
     \u{001B}[32msync\u{001B}[0m                    Start automated extraction and transfer to Pixel
     \u{001B}[32mconnect-wireless <ip>\u{001B}[0m   Connect to Pixel over local Wi-Fi (Wireless ADB)
     \u{001B}[32mhistory\u{001B}[0m                 View past sync statistics and database records
@@ -28,6 +29,9 @@ func printHelp() {
 
 \u{001B}[1mSYNC OPTIONS:\u{001B}[0m
     --batch-size <GB>       Batch limit in GB (default: 5)
+    --unlimited             Transfer everything at once without batching
+    --source <id/name>      Select specific iPhone/iPad as source
+    --target <serial>       Select specific Android device as target
     --no-motion-photos      Do not merge Live Photos into Google Motion Photos
     --exclude-screenshots   Skip screenshots and screen recordings
     --exclude-videos        Skip standalone video files
@@ -38,7 +42,10 @@ func printHelp() {
 }
 
 func formatBytes(_ bytes: Int64) -> String {
-    ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    if bytes >= SyncConfiguration.unlimitedBatchSize {
+        return "Unlimited (All at once)"
+    }
+    return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
 }
 
 func main() async {
@@ -91,6 +98,35 @@ func main() async {
             df.dateStyle = .medium
             df.timeStyle = .short
             print("  Last Sync:          \(df.string(from: lastDate))")
+        }
+        print()
+
+    case "devices":
+        print(banner)
+        print("\u{001B}[1m🔍 Scanning for connected devices...\u{001B}[0m\n")
+        orchestrator.startMonitoring()
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+
+        print("\u{001B}[1m--- [Available Source Devices (iOS)] ---\u{001B}[0m")
+        if orchestrator.availableIPhones.isEmpty {
+            print("  No iOS devices found. Plug in via USB and unlock screen.")
+        } else {
+            for (idx, phone) in orchestrator.availableIPhones.enumerated() {
+                let isSelected = phone.id == orchestrator.selectedIPhoneId ? " \u{001B}[32m(Selected)\u{001B}[0m" : ""
+                print("  [\(idx + 1)] \(phone.name) [ID: \(phone.id)]\(isSelected)")
+                print("      \(phone.totalMediaCount) camera items • \(phone.isLocked ? "Locked" : "Unlocked")")
+            }
+        }
+
+        print("\n\u{001B}[1m--- [Available Target Devices (Android)] ---\u{001B}[0m")
+        if orchestrator.availableAndroidDevices.isEmpty {
+            print("  No Android devices found via ADB. Check USB debugging.")
+        } else {
+            for (idx, device) in orchestrator.availableAndroidDevices.enumerated() {
+                let isSelected = device.serial == orchestrator.selectedPixelSerial ? " \u{001B}[32m(Selected)\u{001B}[0m" : ""
+                let conn = device.isWireless ? "Wireless" : "USB"
+                print("  [\(idx + 1)] \(device.model) (\(conn)) [Serial: \(device.serial)]\(isSelected)")
+            }
         }
         print()
 
@@ -165,7 +201,19 @@ func main() async {
         print("🔍 Connecting to devices (waiting up to 3 seconds)...")
         try? await Task.sleep(nanoseconds: 2_000_000_000)
 
-        guard let _ = orchestrator.connectedIPhone else {
+        if let sIndex = args.firstIndex(of: "--source"), sIndex + 1 < args.count {
+            let targetSource = args[sIndex + 1]
+            if let match = orchestrator.availableIPhones.first(where: { $0.id == targetSource || $0.name.lowercased().contains(targetSource.lowercased()) }) {
+                orchestrator.selectSourceIPhone(id: match.id)
+            }
+        }
+
+        if let tIndex = args.firstIndex(of: "--target"), tIndex + 1 < args.count {
+            let targetSerial = args[tIndex + 1]
+            orchestrator.selectTargetPixel(serial: targetSerial)
+        }
+
+        guard let phone = orchestrator.connectedIPhone else {
             print("\u{001B}[31mError:\u{001B}[0m iPhone not detected. Connect via USB and unlock phone.")
             return
         }
@@ -179,6 +227,8 @@ func main() async {
         let totalBytes = pending.reduce(0) { $0 + $1.fileSize }
 
         print("\n\u{001B}[1mSync Plan:\u{001B}[0m")
+        print("  Source Device:       \(phone.name)")
+        print("  Target Device:       \(pixel.model) (\(pixel.isWireless ? "Wi-Fi" : "USB")) [\(pixel.serial)]")
         print("  Pending Media:       \(pending.count) items (\(formatBytes(totalBytes)))")
         print("  Pixel Target:        \(config.targetPixelPath)")
         print("  Batch Limit:         \(formatBytes(config.batchSizeLimitBytes))")

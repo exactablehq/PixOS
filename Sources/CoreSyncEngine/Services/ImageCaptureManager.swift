@@ -34,6 +34,7 @@ public final class ImageCaptureManager: NSObject, @unchecked Sendable, ICDeviceB
     public var onMediaItemsLoaded: (([MediaItem]) -> Void)?
 
     private var cachedMediaFiles: [String: ICCameraFile] = [:]
+    public private(set) var discoveredCameras: [ICCameraDevice] = []
     private var downloadContinuation: CheckedContinuation<URL, Error>?
     private var currentDownloadDestination: URL?
     private let syncQueue = DispatchQueue(label: "com.exactable.pixos.imagecapture")
@@ -54,32 +55,72 @@ public final class ImageCaptureManager: NSObject, @unchecked Sendable, ICDeviceB
         browser.stop()
     }
 
+    public func selectCamera(id: String) {
+        syncQueue.sync {
+            if let selected = discoveredCameras.first(where: { ($0.uuidString ?? $0.name) == id }) {
+                if activeCamera != selected {
+                    activeCamera = selected
+                    if !selected.hasOpenSession {
+                        selected.requestOpenSession()
+                    } else {
+                        processCameraFiles(camera: selected)
+                    }
+                }
+            }
+        }
+        notifyDeviceChanged()
+    }
+
     // MARK: - ICDeviceBrowserDelegate
 
     public func deviceBrowser(_ browser: ICDeviceBrowser, didAdd device: ICDevice, moreComing: Bool) {
         if let camera = device as? ICCameraDevice {
             camera.delegate = self
-            if !camera.hasOpenSession {
-                camera.requestOpenSession()
+            syncQueue.sync {
+                if !discoveredCameras.contains(where: { $0 == camera }) {
+                    discoveredCameras.append(camera)
+                }
+            }
+            if activeCamera == nil {
+                activeCamera = camera
+                if !camera.hasOpenSession {
+                    camera.requestOpenSession()
+                }
             }
             notifyDeviceChanged()
         }
     }
 
     public func deviceBrowser(_ browser: ICDeviceBrowser, didRemove device: ICDevice, moreGoing: Bool) {
-        if device == activeCamera {
-            activeCamera = nil
+        if let camera = device as? ICCameraDevice {
+            syncQueue.sync {
+                discoveredCameras.removeAll(where: { $0 == camera })
+            }
+            if device == activeCamera {
+                activeCamera = discoveredCameras.first
+                if let next = activeCamera, !next.hasOpenSession {
+                    next.requestOpenSession()
+                }
+            }
+            notifyDeviceChanged()
         }
-        notifyDeviceChanged()
     }
 
     // MARK: - ICDeviceDelegate
 
     public func didRemove(_ device: ICDevice) {
-        if device == activeCamera {
-            activeCamera = nil
+        if let camera = device as? ICCameraDevice {
+            syncQueue.sync {
+                discoveredCameras.removeAll(where: { $0 == camera })
+            }
+            if device == activeCamera {
+                activeCamera = discoveredCameras.first
+                if let next = activeCamera, !next.hasOpenSession {
+                    next.requestOpenSession()
+                }
+            }
+            notifyDeviceChanged()
         }
-        notifyDeviceChanged()
     }
 
     public func deviceDidBecomeReady(_ device: ICDevice) {
@@ -246,20 +287,30 @@ public final class ImageCaptureManager: NSObject, @unchecked Sendable, ICDeviceB
     }
 
     private func notifyDeviceChanged() {
-        guard let camera = activeCamera else {
+        let cameras: [ICCameraDevice] = syncQueue.sync {
+            var list = discoveredCameras
+            if let active = activeCamera, !list.contains(where: { $0 == active }) {
+                list.append(active)
+            }
+            return list
+        }
+
+        guard !cameras.isEmpty else {
             onDeviceListChanged?([])
             return
         }
 
-        let phone = ConnectedIPhone(
-            id: camera.uuidString ?? camera.name ?? "iPhone",
-            name: camera.name ?? "iPhone",
-            isLocked: camera.isLocked,
-            hasOpenSession: camera.hasOpenSession,
-            totalMediaCount: camera.mediaFiles?.count ?? 0,
-            batteryLevel: camera.batteryLevel
-        )
-        onDeviceListChanged?([phone])
+        let phones = cameras.map { camera in
+            ConnectedIPhone(
+                id: camera.uuidString ?? camera.name ?? "iPhone",
+                name: camera.name ?? "iPhone",
+                isLocked: camera.isLocked,
+                hasOpenSession: camera.hasOpenSession,
+                totalMediaCount: camera.mediaFiles?.count ?? 0,
+                batteryLevel: camera.batteryLevel
+            )
+        }
+        onDeviceListChanged?(phones)
     }
 
     // MARK: - Downloading

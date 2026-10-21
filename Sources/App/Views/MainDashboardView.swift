@@ -151,7 +151,7 @@ public struct MainDashboardView: View {
 
     private var deviceStatusRow: some View {
         HStack(spacing: 16) {
-            // iPhone Device Card
+            // iPhone Device Card (Source Selector)
             HStack(spacing: 12) {
                 ZStack {
                     Circle()
@@ -164,8 +164,32 @@ public struct MainDashboardView: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
-                        Text(orchestrator.connectedIPhone?.name ?? "iPhone (Not Connected)")
-                            .font(.system(size: 14, weight: .semibold))
+                        if orchestrator.availableIPhones.count > 1 {
+                            Menu {
+                                ForEach(orchestrator.availableIPhones) { phone in
+                                    Button(action: { orchestrator.selectSourceIPhone(id: phone.id) }) {
+                                        HStack {
+                                            Text(phone.name)
+                                            if phone.id == orchestrator.selectedIPhoneId {
+                                                Image(systemName: "checkmark")
+                                            }
+                                        }
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text(orchestrator.connectedIPhone?.name ?? "Source Device")
+                                        .font(.system(size: 14, weight: .semibold))
+                                    Image(systemName: "chevron.up.chevron.down")
+                                        .font(.system(size: 10))
+                                }
+                            }
+                            .menuStyle(.borderlessButton)
+                        } else {
+                            Text(orchestrator.connectedIPhone?.name ?? "iPhone (Not Connected)")
+                                .font(.system(size: 14, weight: .semibold))
+                        }
+
                         if orchestrator.connectedIPhone != nil {
                             Circle()
                                 .fill(Color.green)
@@ -193,7 +217,7 @@ public struct MainDashboardView: View {
                     .stroke(orchestrator.connectedIPhone != nil ? Color.green.opacity(0.3) : Color.primary.opacity(0.06), lineWidth: 1)
             )
 
-            // Google Pixel Device Card
+            // Google Pixel Device Card (Target Selector)
             HStack(spacing: 12) {
                 ZStack {
                     Circle()
@@ -206,8 +230,32 @@ public struct MainDashboardView: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
-                        Text(orchestrator.connectedPixel?.model ?? "Pixel (Not Connected)")
-                            .font(.system(size: 14, weight: .semibold))
+                        if orchestrator.availableAndroidDevices.count > 1 {
+                            Menu {
+                                ForEach(orchestrator.availableAndroidDevices) { device in
+                                    Button(action: { orchestrator.selectTargetPixel(serial: device.serial) }) {
+                                        HStack {
+                                            Text("\(device.model) (\(device.isWireless ? "Wi-Fi" : "USB")) [\(device.serial)]")
+                                            if device.serial == orchestrator.selectedPixelSerial {
+                                                Image(systemName: "checkmark")
+                                            }
+                                        }
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text(orchestrator.connectedPixel?.model ?? "Target Device")
+                                        .font(.system(size: 14, weight: .semibold))
+                                    Image(systemName: "chevron.up.chevron.down")
+                                        .font(.system(size: 10))
+                                }
+                            }
+                            .menuStyle(.borderlessButton)
+                        } else {
+                            Text(orchestrator.connectedPixel?.model ?? "Pixel (Not Connected)")
+                                .font(.system(size: 14, weight: .semibold))
+                        }
+
                         if let pixel = orchestrator.connectedPixel {
                             Circle()
                                 .fill(pixel.isAuthorized ? Color.green : Color.yellow)

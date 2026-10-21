@@ -39,11 +39,13 @@ If you own an iPhone and are tired of paying Apple $36 to $360 every year for ex
 
 ## 🚀 Quick Start (Download App)
 
-1. Download the latest **`PixOS-1.0.0.dmg`** from [Releases](https://github.com/exactablehq/PixOS/releases).
+1. Download the latest **`PixOS-1.1.0.dmg`** from [Releases](https://github.com/exactablehq/PixOS/releases).
 2. Open the DMG and drag **`PixOS.app`** to your **`/Applications`** folder.
-3. Launch PixOS and connect your devices:
-   - **iPhone**: Plug in via Lightning / USB-C, unlock your phone, and tap **"Trust This Computer"** if prompted.
-   - **Google Pixel**: Enable **Developer Options** and turn on **USB Debugging**. Plug in via USB or click **"Wireless ADB"** to pair over your home Wi-Fi.
+3. Launch PixOS:
+   - **Zero-Click CLI Setup**: PixOS automatically installs `pixos` and `adb` command line tools to your system PATH during initial onboarding.
+   - **Connect Devices**:
+     - **iPhone / iPad**: Plug in via Lightning / USB-C, unlock your phone, and tap **"Trust This Computer"** if prompted. Select your device from the dropdown if multiple are connected.
+     - **Google Pixel**: Enable **Developer Options** and turn on **USB Debugging**. Plug in via USB, or open **Wireless ADB** to scan the QR code directly with your Pixel's camera.
 4. Click **"Start Sync to Pixel"**.
 
 ---
@@ -56,8 +58,17 @@ If you prefer using the terminal, PixOS compiles to a standalone, universal CLI 
 # Check device connections, storage, and database statistics
 pixos status
 
+# List all discovered iOS source devices and Android target devices
+pixos devices
+
 # Start interactive sync with 5GB batch limit
 pixos sync --batch-size 5G
+
+# Transfer all pending media in a single unrestricted batch
+pixos sync --unlimited
+
+# Target a specific iPhone source and Android device serial
+pixos sync --source "iPhone 15 Pro" --target "FA6980301042"
 
 # Dry run (scan camera roll and compute pending transfers without pushing)
 pixos sync --dry-run
@@ -73,6 +84,9 @@ pixos history
 | Option | Description | Default |
 |---|---|---|
 | `--batch-size <GB>` | Maximum size per batch before pausing | `5G` |
+| `--unlimited` | Transfer all pending media without batching | `false` |
+| `--source <id/name>` | Select specific iPhone/iPad as source | First detected |
+| `--target <serial>` | Select specific Android device as target | First authorized |
 | `--no-motion-photos` | Push Live Photo companion MOV separately | `false` |
 | `--exclude-screenshots`| Skip screenshots and screen recordings | `false` |
 | `--exclude-videos` | Skip standalone video files | `false` |

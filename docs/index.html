@@ -48,7 +48,7 @@
         "priceCurrency": "USD"
       },
       "description": "Native macOS application and CLI to transfer full-resolution media and Live Photos from iPhone to Google Pixel via ADB for lifetime free unlimited original quality Google Photos cloud backup.",
-      "softwareVersion": "1.0.0",
+      "softwareVersion": "1.1.0",
       "license": "https://opensource.org/licenses/MIT",
       "author": {
         "@type": "Organization",
@@ -71,7 +71,7 @@
             <a href="#" class="brand-logo" id="nav-brand">
                 <span class="logo-icon">⇄</span>
                 <span class="logo-text">PixOS</span>
-                <span class="badge-pill">v1.0.0</span>
+                <span class="badge-pill">v1.1.0</span>
             </a>
             <nav class="nav-links">
                 <a href="#features" class="nav-item">Features</a>
@@ -337,10 +337,14 @@
   Status:     <span class="cmd-success">Connected (Wireless ADB)</span>
   Model:      Pixel (sailfish) • 24.2 GB Free
 
-<span class="cmd-prompt">$</span> <span class="cmd-text">pixos sync --batch-size 5G</span>
-<span class="cmd-success">✔ Initialized 5GB smart batching pipeline</span>
-<span class="cmd-dim">Transferring IMG_4821.HEIC... [34.5 MB/s]</span>
-<span class="cmd-success">✔ Sync complete! Backed up 124 items to Google Pixel.</span></code></pre>
+<span class="cmd-prompt">$</span> <span class="cmd-text">pixos devices</span>
+  [1] iPhone 15 Pro [ID: 00008101-0012480] <span class="cmd-success">(Selected Source)</span>
+  [2] Google Pixel (Wireless) [Serial: 192.168.1.150:5555] <span class="cmd-success">(Selected Target)</span>
+
+<span class="cmd-prompt">$</span> <span class="cmd-text">pixos sync --unlimited</span>
+<span class="cmd-success">✔ Initialized Unlimited Transfer Pipeline</span>
+<span class="cmd-dim">Transferring IMG_4821.HEIC... [42.1 MB/s]</span>
+<span class="cmd-success">✔ Sync complete! Backed up 3,482 items to Google Pixel.</span></code></pre>
                 </div>
             </div>
         </section>
