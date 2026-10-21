@@ -72,6 +72,15 @@ func main() async {
             let catalogStatus = orchestrator.isCatalogComplete ? "Catalog complete" : "Indexing..."
             print("  Media:      \(phone.totalMediaCount) items detected (\(catalogStatus))")
             print("  Lock State: \(phone.isLocked ? "\u{001B}[33mPasscode Locked (Please unlock device screen)\u{001B}[0m" : "\u{001B}[32mUnlocked & Ready\u{001B}[0m")")
+            if phone.iCloudPhotosEnabled {
+                print("  iCloud:     \u{001B}[33mOptimize iPhone Storage Active\u{001B}[0m (Only locally cached media is accessible over USB)")
+            }
+            if !orchestrator.allDiscoveredMedia.isEmpty {
+                print("  Sample Media in Local Camera Roll:")
+                for item in orchestrator.allDiscoveredMedia.prefix(5) {
+                    print("    • \(item.filename) (\(item.formattedSize), \(item.mediaType.rawValue))")
+                }
+            }
         } else {
             print("  Status:     \u{001B}[31mNot Detected\u{001B}[0m (Plug in iPhone via USB and tap 'Trust This Computer')")
         }
@@ -215,35 +224,58 @@ func main() async {
             orchestrator.selectTargetPixel(serial: targetSerial)
         }
 
-        guard var phone = orchestrator.connectedIPhone else {
-            print("\u{001B}[31mError:\u{001B}[0m iPhone not detected. Connect via USB and unlock phone.")
-            return
+        let isICloud = args.contains("--icloud") || (args.firstIndex(of: "--source").map { args[$0 + 1].lowercased() == "icloud" } ?? false)
+        if isICloud {
+            orchestrator.selectSourceType(.icloudPhotos)
+        } else {
+            orchestrator.selectSourceType(.usbIPhone)
         }
 
-        if phone.isLocked {
-            print("\n\u{001B}[33m🔒 iPhone is Passcode Locked\u{001B}[0m")
-            print("👉 Please unlock your iPhone screen with Face ID / Passcode and tap 'Trust This Computer' if prompted.")
-            print("⏳ Waiting up to 20 seconds for unlock...")
-
-            var unlocked = false
-            for _ in 0..<40 {
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                if let p = orchestrator.connectedIPhone, !p.isLocked {
-                    unlocked = true
-                    phone = p
-                    break
-                }
-            }
-
-            if !unlocked {
-                print("\u{001B}[31mError:\u{001B}[0m iPhone remained locked. Unlock screen and try again.")
+        if !isICloud {
+            guard var phone = orchestrator.connectedIPhone else {
+                print("\u{001B}[31mError:\u{001B}[0m iPhone not detected. Connect via USB or pass '--icloud' to stream from iCloud.")
                 return
             }
 
-            print("\u{001B}[32m✔ iPhone unlocked! Reading full media catalog...\u{001B}[0m")
-            _ = await orchestrator.waitForMedia(timeout: 5.0)
-            if let p = orchestrator.connectedIPhone {
-                phone = p
+            if phone.isLocked {
+                print("\n\u{001B}[33m🔒 iPhone is Passcode Locked\u{001B}[0m")
+                print("👉 Please unlock your iPhone screen with Face ID / Passcode and tap 'Trust This Computer' if prompted.")
+                print("⏳ Waiting up to 20 seconds for unlock...")
+
+                var unlocked = false
+                for _ in 0..<40 {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    if let p = orchestrator.connectedIPhone, !p.isLocked {
+                        unlocked = true
+                        phone = p
+                        break
+                    }
+                }
+
+                if !unlocked {
+                    print("\u{001B}[31mError:\u{001B}[0m iPhone remained locked. Unlock screen and try again.")
+                    return
+                }
+
+                print("\u{001B}[32m✔ iPhone unlocked! Reading full media catalog...\u{001B}[0m")
+                _ = await orchestrator.waitForMedia(timeout: 5.0)
+            }
+        } else {
+            print("☁️ Connecting to iCloud / Mac Photos Library...")
+            let status = orchestrator.photoKitManager.authorizationStatus
+            if status != .authorized && status != .limited {
+                let granted = await orchestrator.photoKitManager.requestAuthorization()
+                if !granted {
+                    print("\u{001B}[31mError:\u{001B}[0m Photos permission not granted. Grant access in System Settings > Privacy & Security > Photos.")
+                    return
+                }
+            }
+            orchestrator.photoKitManager.startCataloging()
+            for _ in 0..<20 {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                if orchestrator.isCatalogComplete || !orchestrator.allDiscoveredMedia.isEmpty {
+                    break
+                }
             }
         }
 
@@ -256,8 +288,9 @@ func main() async {
         let pending = orchestrator.pendingQueue
         let totalBytes = pending.reduce(0) { $0 + $1.fileSize }
 
+        let sourceName = orchestrator.selectedSourceType == .icloudPhotos ? "iCloud / Mac Photos Library" : (orchestrator.connectedIPhone?.name ?? "iPhone")
         print("\n\u{001B}[1mSync Plan:\u{001B}[0m")
-        print("  Source Device:       \(phone.name)")
+        print("  Source:              \(sourceName)")
         print("  Target Device:       \(pixel.model) (\(pixel.isWireless ? "Wi-Fi" : "USB")) [\(pixel.serial)]")
         print("  Pending Media:       \(pending.count) items (\(formatBytes(totalBytes)))")
         print("  Pixel Target:        \(config.targetPixelPath)")

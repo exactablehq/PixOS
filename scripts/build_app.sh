@@ -20,7 +20,13 @@ mkdir -p "$APP_DIR/Contents/Resources/bin"
 cp "$ROOT_DIR/.build/release/PixOSApp" "$APP_DIR/Contents/MacOS/PixOSApp"
 chmod +x "$APP_DIR/Contents/MacOS/PixOSApp"
 
-# 3. Copy Bundled ADB & pixos CLI into App Resources
+# 3. Copy Bundled ADB, AppIcon & pixos CLI into App Resources
+if [ -f "$ROOT_DIR/Resources/AppIcon.icns" ]; then
+    cp "$ROOT_DIR/Resources/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
+elif [ -f "$ROOT_DIR/Assets/brand/AppIcon.icns" ]; then
+    cp "$ROOT_DIR/Assets/brand/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
+fi
+
 if [ -f "$ROOT_DIR/bin/adb" ]; then
     cp "$ROOT_DIR/bin/adb" "$APP_DIR/Contents/Resources/bin/adb"
     chmod +x "$APP_DIR/Contents/Resources/bin/adb"
@@ -41,6 +47,8 @@ cat << 'EOF' > "$APP_DIR/Contents/Info.plist"
     <string>en</string>
     <key>CFBundleExecutable</key>
     <string>PixOSApp</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>com.exactable.PixOS</string>
     <key>CFBundleInfoDictionaryVersion</key>
@@ -52,15 +60,17 @@ cat << 'EOF' > "$APP_DIR/Contents/Info.plist"
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.1.0</string>
+    <string>1.2.0</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>2</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSCameraUsageDescription</key>
     <string>PixOS accesses your iPhone camera roll to extract and backup photos to your Google Pixel.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>PixOS accesses your iCloud and Mac Photos library to stream full-resolution photos and videos to your Google Pixel and reclaim iCloud storage.</string>
 </dict>
 </plist>
 EOF

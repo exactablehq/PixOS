@@ -8,9 +8,10 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # 1. Build app first
 bash "$SCRIPT_DIR/build_app.sh"
 
+VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$ROOT_DIR/build/PixOS.app/Contents/Info.plist" 2>/dev/null || echo "1.2.0")
 DIST_DIR="$ROOT_DIR/dist"
 STAGING_DIR="$DIST_DIR/dmg_staging"
-DMG_PATH="$DIST_DIR/PixOS-1.1.0.dmg"
+DMG_PATH="$DIST_DIR/PixOS-${VERSION}.dmg"
 
 rm -rf "$STAGING_DIR"
 rm -f "$DMG_PATH"

@@ -9,6 +9,27 @@ public enum MediaType: String, Codable, Sendable {
     case other
 }
 
+public enum MediaSourceType: String, CaseIterable, Identifiable, Sendable {
+    case usbIPhone = "iPhone (USB Cable)"
+    case icloudPhotos = "iCloud / Mac Photos"
+
+    public var id: String { rawValue }
+
+    public var shortTitle: String {
+        switch self {
+        case .usbIPhone: return "iPhone (USB)"
+        case .icloudPhotos: return "iCloud Photos"
+        }
+    }
+
+    public var iconName: String {
+        switch self {
+        case .usbIPhone: return "iphone.gen3"
+        case .icloudPhotos: return "icloud.fill"
+        }
+    }
+}
+
 public struct MediaItem: Identifiable, Sendable, Equatable {
     public let id: String
     public let filename: String

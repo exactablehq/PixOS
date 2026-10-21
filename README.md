@@ -1,6 +1,10 @@
+<p align="center">
+  <img src="Assets/brand/pixos_hero_banner.jpg" alt="PixOS - The Unlimited Google Photos Bridge" width="100%">
+</p>
+
 # PixOS ⇄ 
 
-> **Bypass iCloud Storage Fees Forever.** The native macOS app and CLI utility that extracts full-resolution photos, 4K videos, and Live Photos from your iPhone and syncs them to Google Pixel via ADB for lifetime free unlimited original-quality Google Photos cloud backups.
+> **Bypass iCloud Storage Fees Forever.** The native macOS app and CLI utility that extracts full-resolution photos, 4K videos, and Live Photos from your iPhone or iCloud and syncs them to Google Pixel via ADB for lifetime free unlimited original-quality Google Photos cloud backups.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![macOS 14+](https://img.shields.io/badge/macOS-14.0%2B%20(Sonoma%20%7C%20Sequoia)-black?logo=apple)](https://apple.com)
@@ -15,31 +19,32 @@
 The **original 2016 Google Pixel (OG Pixel / sailfish / marlin)** comes with a unique lifetime perk: **free, unlimited original-quality photo and video backup to Google Photos forever**.
 
 If you own an iPhone and are tired of paying Apple $36 to $360 every year for expanding iCloud storage tiers (50GB, 200GB, 2TB), PixOS gives you a seamless bridge:
-1. Connect your iPhone to your Mac over USB cable.
+1. **Direct iCloud or USB Sourcing**: Source directly from your **iCloud Photos Library** (even if your iPhone has "Optimize iPhone Storage" enabled and only keeps 3 local thumbnails) or connect directly via USB cable.
 2. Connect your Google Pixel to your Mac (via USB cable or **Wireless Wi-Fi ADB**).
-3. **PixOS** extracts full-resolution original media losslessly, automatically merges iPhone Live Photos into **Google Motion Photos** with official XMP metadata, stages and pushes them via ADB to `/sdcard/DCIM/iPhone/`, triggers Android media scanning, and cleans up your Mac cache.
+3. **Zero-Disk-Bloat Micro-Staging**: PixOS downloads each full-resolution original on demand, automatically merges Live Photos into **Google Motion Photos** with official XMP metadata, stages and pushes them via ADB to `/sdcard/DCIM/iPhone/`, triggers Android media scanning, and **instantly deletes the local file from your Mac SSD**. Your Mac never runs out of space!
 4. Google Photos on your Pixel immediately uploads them to the cloud at **100% original quality** without consuming a single byte of your Google account storage.
-5. **Reclaim iPhone space**: Once verified, PixOS offers an optional prompt to delete the backed-up photos from your iPhone.
+5. **Tinder-Like Swipe Cleaner**: Once backed up to Pixel, launch the interactive 3D card deck to swipe right (Keep in iCloud) or swipe left (Purge from iCloud) to instantly free up your paid cloud quota.
 
 ---
 
 ## 📸 Key Features
 
+- **Direct iCloud Photo Library Streaming**: Seamlessly queries your synced iCloud library using Apple's native PhotoKit framework. No passwords or scraping needed—streams full originals and Live Photo `.MOV` videos on-the-fly directly from Apple's iCloud CDN.
+- **Zero-Disk-Bloat Pipeline**: Engineered specifically for MacBooks with limited SSD space. Transfers in strict 1-in-1-out micro-staging, purging local files from `~/.pixos/staging/` immediately after transfer. Monitored with live macOS disk space telemetry.
+- **Tinder-Style iCloud Swipe Triage**: A fluid, responsive 3D card swipe UI (`ICloudSwipeCleanView`) with gesture tracking, keyboard shortcuts (← / → / Z), undo rollback, live reclaimed storage counter, and Apple native batch confirmation sheet.
 - **Liquid Glass macOS Desktop App**: Designed with Apple Retina Liquid Glass vibrancy, live device status pulses (iPhone USB & Pixel ADB), interactive storage gauges, and real-time speed & progress monitors.
 - **Apple Live Photos → Google Motion Photos**: Injects standardized Google Camera XMP container metadata (`Camera:MotionPhoto="1"`) and multiplexes your 3-second companion `.MOV` video directly into the photo. Google Photos renders and animates them natively!
 - **Bundled Standalone ADB**: Comes with prepackaged `adb` binary. No Android Studio, no Homebrew, and no terminal installation needed for non-technical users.
-- **Native ImageCaptureCore**: Direct hardware communication over USB. Zero third-party iOS kernel drivers, zero jailbreaks, and zero pairing certificates.
 - **Dual-Mode ADB (USB & Wi-Fi)**: Keep your Pixel on its charging stand across the room and connect wirelessly over local Wi-Fi via Wireless ADB.
-- **Smart Batching & Storage Safeguard**: Avoids overwhelming your Pixel's 32GB/128GB disk. Transfers in configurable batches (e.g., 5GB), checks free storage before each batch, and pauses gracefully if space is low.
-- **Auto-Purge Staging Cache**: Staged files on your Mac are verified on the Pixel and deleted per-batch to prevent filling up your MacBook's SSD.
+- **Smart Batching & Storage Safeguard**: Avoids overwhelming your Pixel's 32GB/128GB disk. Transfers in configurable batches, checks free storage before each item, and pauses gracefully if space is low.
 - **Local SQLite Deduplication**: Tracks synced media fingerprints in `~/.pixos/sync_state.db`. Subsequent syncs automatically skip already-backed-up media.
-- **Full-Featured Terminal CLI (`pixos`)**: Scriptable command-line tool with color-coded tables, dry-run flags, and batch options for advanced users and power workflows.
+- **Full-Featured Terminal CLI (`pixos`)**: Scriptable command-line tool with color-coded tables, `--icloud` flags, dry-run options, and batch controls for power workflows.
 
 ---
 
 ## 🚀 Quick Start (Download App)
 
-1. Download the latest **`PixOS-1.1.0.dmg`** from [Releases](https://github.com/exactablehq/PixOS/releases).
+1. Download the latest **`PixOS-1.2.0.dmg`** from [Releases](https://github.com/exactablehq/PixOS/releases).
 2. Open the DMG and drag **`PixOS.app`** to your **`/Applications`** folder.
 3. Launch PixOS:
    - **Zero-Click CLI Setup**: PixOS automatically installs `pixos` and `adb` command line tools to your system PATH during initial onboarding.

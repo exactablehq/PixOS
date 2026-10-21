@@ -10,6 +10,7 @@ public struct ConnectedIPhone: Identifiable, Sendable, Equatable {
     public let totalMediaCount: Int
     public let batteryLevel: Int
     public let isCatalogComplete: Bool
+    public let iCloudPhotosEnabled: Bool
 
     public init(
         id: String,
@@ -18,7 +19,8 @@ public struct ConnectedIPhone: Identifiable, Sendable, Equatable {
         hasOpenSession: Bool,
         totalMediaCount: Int,
         batteryLevel: Int,
-        isCatalogComplete: Bool = false
+        isCatalogComplete: Bool = false,
+        iCloudPhotosEnabled: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -27,6 +29,7 @@ public struct ConnectedIPhone: Identifiable, Sendable, Equatable {
         self.totalMediaCount = totalMediaCount
         self.batteryLevel = batteryLevel
         self.isCatalogComplete = isCatalogComplete
+        self.iCloudPhotosEnabled = iCloudPhotosEnabled
     }
 }
 
@@ -37,6 +40,7 @@ public final class ImageCaptureManager: NSObject, @unchecked Sendable, ICDeviceB
     public var onMediaItemsLoaded: (([MediaItem]) -> Void)?
     public var onCatalogCompleted: (() -> Void)?
     public private(set) var isCatalogComplete: Bool = false
+    public private(set) var discoveredMediaItems: [MediaItem] = []
 
     private var cachedMediaFiles: [String: ICCameraFile] = [:]
     public private(set) var discoveredCameras: [ICCameraDevice] = []
@@ -253,22 +257,31 @@ public final class ImageCaptureManager: NSObject, @unchecked Sendable, ICDeviceB
     // MARK: - Processing Media Items
 
     private func extractAllFiles(from camera: ICCameraDevice) -> [ICCameraFile] {
-        if let files = camera.mediaFiles as? [ICCameraFile], !files.isEmpty {
-            return files
+        var fileMap = [String: ICCameraFile]()
+
+        // 1. Collect from direct mediaFiles
+        if let directFiles = camera.mediaFiles as? [ICCameraFile] {
+            for file in directFiles {
+                if let name = file.name {
+                    fileMap[name] = file
+                }
+            }
         }
-        var files: [ICCameraFile] = []
+
+        // 2. Also recursively traverse contents hierarchy (e.g. DCIM/100APPLE, 101APPLE...)
         func traverse(items: [ICCameraItem]?) {
             guard let items = items else { return }
             for item in items {
-                if let file = item as? ICCameraFile {
-                    files.append(file)
+                if let file = item as? ICCameraFile, let name = file.name {
+                    fileMap[name] = file
                 } else if let folder = item as? ICCameraFolder {
                     traverse(items: folder.contents)
                 }
             }
         }
         traverse(items: camera.contents)
-        return files
+
+        return Array(fileMap.values)
     }
 
     private func processCameraFiles(camera: ICCameraDevice) {
@@ -362,6 +375,7 @@ public final class ImageCaptureManager: NSObject, @unchecked Sendable, ICDeviceB
             items.append(item)
         }
 
+        self.discoveredMediaItems = items
         onMediaItemsLoaded?(items)
     }
 
@@ -390,7 +404,8 @@ public final class ImageCaptureManager: NSObject, @unchecked Sendable, ICDeviceB
                 hasOpenSession: camera.hasOpenSession,
                 totalMediaCount: fileCount,
                 batteryLevel: camera.batteryLevel,
-                isCatalogComplete: self.isCatalogComplete
+                isCatalogComplete: self.isCatalogComplete,
+                iCloudPhotosEnabled: camera.iCloudPhotosEnabled
             )
         }
         onDeviceListChanged?(phones)

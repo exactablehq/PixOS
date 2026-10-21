@@ -13,10 +13,12 @@ public enum SyncState: String, Sendable {
 
 public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
     public let imageCaptureManager: ImageCaptureManager
+    public let photoKitManager: PhotoKitSourceManager
     public let adbClient: ADBClient
     public let database: SyncDatabase
     @Published public var config: SyncConfiguration
 
+    @Published public var selectedSourceType: MediaSourceType = .icloudPhotos
     @Published public var state: SyncState = .idle
     @Published public var progress: SyncProgress = SyncProgress()
     @Published public var availableIPhones: [ConnectedIPhone] = []
@@ -27,6 +29,10 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
     @Published public var allDiscoveredMedia: [MediaItem] = []
     @Published public var pendingQueue: [MediaItem] = []
     @Published public var syncedInSession: [MediaItem] = []
+    @Published public var triageQueue: [MediaItem] = []
+    @Published public var markedForICloudDeletion: [MediaItem] = []
+    @Published public var markedToKeepInICloud: [MediaItem] = []
+    @Published public var totalICloudBytesFreed: Int64 = 0
     @Published public var lastErrorMessage: String? = nil
     @Published public var isCatalogComplete: Bool = false
 
@@ -54,6 +60,7 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
     ) {
         self.config = config
         self.imageCaptureManager = ImageCaptureManager()
+        self.photoKitManager = PhotoKitSourceManager()
         self.adbClient = ADBClient(customPath: customADBPath ?? config.customADBPath)
         self.database = SyncDatabase(customPath: customDBPath)
 
@@ -71,23 +78,63 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
         }
 
         imageCaptureManager.onMediaItemsLoaded = { [weak self] items in
+            guard let self = self, self.selectedSourceType == .usbIPhone else { return }
             DispatchQueue.main.async {
-                self?.allDiscoveredMedia = items
-                self?.recalculatePendingQueue()
+                self.allDiscoveredMedia = items
+                self.recalculatePendingQueue()
             }
         }
 
         imageCaptureManager.onCatalogCompleted = { [weak self] in
+            guard let self = self, self.selectedSourceType == .usbIPhone else { return }
             DispatchQueue.main.async {
-                self?.isCatalogComplete = true
-                self?.recalculatePendingQueue()
+                self.isCatalogComplete = true
+                self.recalculatePendingQueue()
             }
+        }
+
+        photoKitManager.onMediaItemsLoaded = { [weak self] items in
+            guard let self = self, self.selectedSourceType == .icloudPhotos else { return }
+            DispatchQueue.main.async {
+                self.allDiscoveredMedia = items
+                self.recalculatePendingQueue()
+            }
+        }
+
+        photoKitManager.onCatalogCompleted = { [weak self] in
+            guard let self = self, self.selectedSourceType == .icloudPhotos else { return }
+            DispatchQueue.main.async {
+                self.isCatalogComplete = true
+                self.recalculatePendingQueue()
+            }
+        }
+    }
+
+    public func selectSourceType(_ type: MediaSourceType) {
+        selectedSourceType = type
+        isCatalogComplete = false
+        allDiscoveredMedia.removeAll()
+        pendingQueue.removeAll()
+
+        switch type {
+        case .usbIPhone:
+            photoKitManager.stopCataloging()
+            allDiscoveredMedia = imageCaptureManager.discoveredMediaItems
+            isCatalogComplete = imageCaptureManager.isCatalogComplete
+            recalculatePendingQueue()
+        case .icloudPhotos:
+            photoKitManager.updateAuthorizationStatus()
+            photoKitManager.startCataloging()
         }
     }
 
     public func refreshIPhone() {
         isCatalogComplete = false
-        imageCaptureManager.refreshActiveCamera()
+        if selectedSourceType == .usbIPhone {
+            imageCaptureManager.refreshActiveCamera()
+        } else {
+            photoKitManager.startCataloging()
+        }
     }
 
     public func waitForMedia(timeout: TimeInterval = 10.0) async -> Bool {
@@ -124,6 +171,10 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
 
     public func startMonitoring() {
         imageCaptureManager.startBrowsing()
+        photoKitManager.updateAuthorizationStatus()
+        if selectedSourceType == .icloudPhotos {
+            photoKitManager.startCataloging()
+        }
         pollADB()
         timer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
             self?.pollADB()
@@ -132,6 +183,7 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
 
     public func stopMonitoring() {
         imageCaptureManager.stopBrowsing()
+        photoKitManager.stopCataloging()
         timer?.invalidate()
         timer = nil
     }
@@ -195,12 +247,22 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
         guard let pixel = connectedPixel, pixel.isAuthorized else {
             throw ADBError.deviceNotFound
         }
-        guard connectedIPhone != nil else {
-            throw NSError(
-                domain: "PixOS.Sync",
-                code: 404,
-                userInfo: [NSLocalizedDescriptionKey: "No iPhone connected via USB. Please unlock phone and trust computer."]
-            )
+
+        if selectedSourceType == .usbIPhone {
+            guard connectedIPhone != nil else {
+                throw NSError(
+                    domain: "PixOS.Sync",
+                    code: 404,
+                    userInfo: [NSLocalizedDescriptionKey: "No iPhone connected via USB. Please unlock phone and trust computer."]
+                )
+            }
+        } else {
+            if photoKitManager.authorizationStatus != .authorized && photoKitManager.authorizationStatus != .limited {
+                let granted = await photoKitManager.requestAuthorization()
+                guard granted else {
+                    throw PhotoKitError.notAuthorized
+                }
+            }
         }
 
         isCancelled = false
@@ -300,6 +362,20 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
                 if isCancelled { break }
                 itemCounter += 1
 
+                // Check Mac available disk space to protect user's SSD
+                let macFree = PhotoKitSourceManager.getMacFreeDiskBytes()
+                if macFree < 2 * 1024 * 1024 * 1024 { // Under 2GB free on Mac
+                    PhotoKitSourceManager.cleanStagingDirectory()
+                    if PhotoKitSourceManager.getMacFreeDiskBytes() < 1 * 1024 * 1024 * 1024 {
+                        await MainActor.run {
+                            self.state = .pausedForStorage
+                            self.progress.isPausedForStorage = true
+                            self.progress.statusDescription = "Paused: Mac internal storage critically low (<1 GB free). Free space to resume."
+                        }
+                        return
+                    }
+                }
+
                 let currentItemNum = itemCounter
                 let currentItemName = item.filename
                 await MainActor.run {
@@ -308,28 +384,48 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
                     self.progress.statusDescription = "Staging \(currentItemName)..."
                 }
 
-                // Download primary file to staging
-                let stagedPrimaryURL = try await imageCaptureManager.downloadFile(named: item.filename, to: stagingDir)
-                var fileToPush = stagedPrimaryURL
+                // Download primary file and companion video to staging
+                var stagedPrimaryURL: URL
+                var stagedVideoURL: URL? = nil
                 var isMotionPhoto = false
 
+                if selectedSourceType == .icloudPhotos {
+                    await MainActor.run {
+                        self.progress.statusDescription = "Streaming \(item.filename) from iCloud..."
+                    }
+                    let res = try await photoKitManager.downloadAsset(id: item.id, to: stagingDir) { progressFraction in
+                        let pct = Int(progressFraction * 100)
+                        DispatchQueue.main.async {
+                            self.progress.statusDescription = "Streaming \(item.filename) from iCloud (\(pct)%)..."
+                        }
+                    }
+                    stagedPrimaryURL = res.primaryURL
+                    stagedVideoURL = res.companionVideoURL
+                } else {
+                    stagedPrimaryURL = try await imageCaptureManager.downloadFile(named: item.filename, to: stagingDir)
+                    if item.isLivePhoto && config.combineLivePhotos, let companionName = item.companionVideoName {
+                        stagedVideoURL = try? await imageCaptureManager.downloadFile(named: companionName, to: stagingDir)
+                    }
+                }
+
+                var fileToPush = stagedPrimaryURL
+
                 // Handle Live Photo combination
-                if item.isLivePhoto && config.combineLivePhotos, let companionName = item.companionVideoName {
+                if item.isLivePhoto && config.combineLivePhotos, let companionURL = stagedVideoURL {
                     await MainActor.run {
                         self.progress.statusDescription = "Packaging Live Photo for \(item.filename)..."
                     }
-                    if let stagedVideoURL = try? await imageCaptureManager.downloadFile(named: companionName, to: stagingDir) {
-                        let motionURL = stagingDir.appendingPathComponent("MOTION_\(item.filename)")
-                        if (try? MotionPhotoBuilder.buildMotionPhoto(imageURL: stagedPrimaryURL, videoURL: stagedVideoURL, outputURL: motionURL)) != nil {
-                            fileToPush = motionURL
-                            isMotionPhoto = true
-                            try? FileManager.default.removeItem(at: stagedVideoURL)
-                        } else {
-                            // If motion builder fails, also push companion video side-by-side
-                            try await adbClient.push(localURL: stagedVideoURL, remotePath: "\(targetDir)/\(companionName)", serial: pixel.serial)
-                            try? await adbClient.triggerMediaScan(remotePath: "\(targetDir)/\(companionName)", serial: pixel.serial)
-                            try? FileManager.default.removeItem(at: stagedVideoURL)
-                        }
+                    let motionURL = stagingDir.appendingPathComponent("MOTION_\(item.filename)")
+                    if (try? MotionPhotoBuilder.buildMotionPhoto(imageURL: stagedPrimaryURL, videoURL: companionURL, outputURL: motionURL)) != nil {
+                        fileToPush = motionURL
+                        isMotionPhoto = true
+                        try? FileManager.default.removeItem(at: companionURL)
+                    } else {
+                        // If motion builder fails, also push companion video side-by-side
+                        let companionRemoteName = companionURL.lastPathComponent
+                        try await adbClient.push(localURL: companionURL, remotePath: "\(targetDir)/\(companionRemoteName)", serial: pixel.serial)
+                        try? await adbClient.triggerMediaScan(remotePath: "\(targetDir)/\(companionRemoteName)", serial: pixel.serial)
+                        try? FileManager.default.removeItem(at: companionURL)
                     }
                 }
 
@@ -355,10 +451,13 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
                     isMotionPhoto: isMotionPhoto
                 )
 
-                // Clean up Mac staging copy
+                // Clean up Mac staging copy immediately to keep disk footprint minimal
                 try? FileManager.default.removeItem(at: stagedPrimaryURL)
                 if fileToPush != stagedPrimaryURL {
                     try? FileManager.default.removeItem(at: fileToPush)
+                }
+                if let companion = stagedVideoURL {
+                    try? FileManager.default.removeItem(at: companion)
                 }
 
                 overallTransferredBytes += item.fileSize
@@ -371,6 +470,9 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
                     self.progress.bytesTransferred = bytesDone
                     self.progress.speedBytesPerSecond = speed
                     self.syncedInSession.append(currentItem)
+                    if !self.triageQueue.contains(where: { $0.id == currentItem.id }) {
+                        self.triageQueue.append(currentItem)
+                    }
                 }
             }
         }
@@ -383,6 +485,13 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
     }
 
     public func deleteSessionItemsFromiPhone() async throws {
+        guard selectedSourceType == .usbIPhone else {
+            // Protect cloud library from accidental deletion
+            await MainActor.run {
+                self.syncedInSession.removeAll()
+            }
+            return
+        }
         let filenames = syncedInSession.map { $0.filename }
         try await imageCaptureManager.deleteFiles(named: filenames)
         for item in syncedInSession {
@@ -391,5 +500,64 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
         await MainActor.run {
             self.syncedInSession.removeAll()
         }
+    }
+
+    // MARK: - iCloud Swipe Triage & Cleanup
+
+    public func populateTriageQueue() {
+        let syncedSet = database.getAllSyncedFingerprints()
+        if !syncedInSession.isEmpty {
+            triageQueue = syncedInSession.filter { item in
+                !markedForICloudDeletion.contains(where: { $0.id == item.id }) &&
+                !markedToKeepInICloud.contains(where: { $0.id == item.id })
+            }
+        } else {
+            triageQueue = allDiscoveredMedia.filter { item in
+                syncedSet.contains(item.fingerprint) &&
+                !markedForICloudDeletion.contains(where: { $0.id == item.id }) &&
+                !markedToKeepInICloud.contains(where: { $0.id == item.id })
+            }
+        }
+    }
+
+    public func swipeKeep(item: MediaItem) {
+        triageQueue.removeAll(where: { $0.id == item.id })
+        markedToKeepInICloud.append(item)
+    }
+
+    public func swipeDelete(item: MediaItem) {
+        triageQueue.removeAll(where: { $0.id == item.id })
+        markedForICloudDeletion.append(item)
+        totalICloudBytesFreed += item.fileSize
+    }
+
+    public func undoLastSwipe() {
+        if let lastDeleted = markedForICloudDeletion.popLast() {
+            triageQueue.insert(lastDeleted, at: 0)
+            totalICloudBytesFreed = max(0, totalICloudBytesFreed - lastDeleted.fileSize)
+        } else if let lastKept = markedToKeepInICloud.popLast() {
+            triageQueue.insert(lastKept, at: 0)
+        }
+    }
+
+    public func markAllSyncedForDeletion() {
+        for item in triageQueue {
+            markedForICloudDeletion.append(item)
+            totalICloudBytesFreed += item.fileSize
+        }
+        triageQueue.removeAll()
+    }
+
+    public func purgeMarkedICloudAssets() async throws -> Int {
+        let count = markedForICloudDeletion.count
+        guard count > 0 else { return 0 }
+        let ids = markedForICloudDeletion.map { $0.id }
+        try await photoKitManager.deleteAssets(ids: ids)
+        await MainActor.run {
+            self.allDiscoveredMedia.removeAll(where: { item in ids.contains(item.id) })
+            self.markedForICloudDeletion.removeAll()
+            self.recalculatePendingQueue()
+        }
+        return count
     }
 }
