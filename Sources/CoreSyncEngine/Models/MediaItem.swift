@@ -81,6 +81,14 @@ public struct MediaItem: Identifiable, Sendable, Equatable {
     public var isVideo: Bool {
         mediaType == .video || mediaType == .screenRecording
     }
+
+    public var isStandardPhoto: Bool {
+        mediaType == .photo && !isLivePhoto
+    }
+
+    public var isScreenshotOrRecording: Bool {
+        mediaType == .screenshot || mediaType == .screenRecording
+    }
 }
 
 public struct AndroidDevice: Identifiable, Sendable, Equatable {
@@ -138,8 +146,13 @@ public struct SyncConfiguration: Sendable, Equatable {
 
     public var batchSizeLimitBytes: Int64
     public var combineLivePhotos: Bool
-    public var includeScreenshots: Bool
+    public var includeLivePhotos: Bool
+    public var includePhotos: Bool
     public var includeVideos: Bool
+    public var includeScreenshots: Bool
+    public var includeScreenRecordings: Bool
+    public var stripMotionFromPhotos: Bool
+    public var overwriteMode: Bool
     public var targetPixelPath: String
     public var customADBPath: String?
     public var safeFreeStorageThresholdBytes: Int64
@@ -148,8 +161,13 @@ public struct SyncConfiguration: Sendable, Equatable {
     public init(
         batchSizeLimitBytes: Int64 = 5 * 1024 * 1024 * 1024, // 5 GB
         combineLivePhotos: Bool = true,
-        includeScreenshots: Bool = true,
+        includeLivePhotos: Bool = true,
+        includePhotos: Bool = true,
         includeVideos: Bool = true,
+        includeScreenshots: Bool = true,
+        includeScreenRecordings: Bool = true,
+        stripMotionFromPhotos: Bool = false,
+        overwriteMode: Bool = false,
         targetPixelPath: String = "/sdcard/DCIM/iPhone",
         customADBPath: String? = nil,
         safeFreeStorageThresholdBytes: Int64 = 2 * 1024 * 1024 * 1024, // 2 GB
@@ -157,8 +175,13 @@ public struct SyncConfiguration: Sendable, Equatable {
     ) {
         self.batchSizeLimitBytes = batchSizeLimitBytes
         self.combineLivePhotos = combineLivePhotos
-        self.includeScreenshots = includeScreenshots
+        self.includeLivePhotos = includeLivePhotos
+        self.includePhotos = includePhotos
         self.includeVideos = includeVideos
+        self.includeScreenshots = includeScreenshots
+        self.includeScreenRecordings = includeScreenRecordings
+        self.stripMotionFromPhotos = stripMotionFromPhotos
+        self.overwriteMode = overwriteMode
         self.targetPixelPath = targetPixelPath
         self.customADBPath = customADBPath
         self.safeFreeStorageThresholdBytes = safeFreeStorageThresholdBytes

@@ -1,4 +1,7 @@
 import Foundation
+import ImageIO
+import CoreGraphics
+import AVFoundation
 
 public struct MotionPhotoBuilder: Sendable {
     public static func buildMotionPhoto(
@@ -6,22 +9,53 @@ public struct MotionPhotoBuilder: Sendable {
         videoURL: URL,
         outputURL: URL
     ) throws {
-        guard let imageData = try? Data(contentsOf: imageURL),
-              let videoData = try? Data(contentsOf: videoURL) else {
+        guard FileManager.default.fileExists(atPath: imageURL.path),
+              FileManager.default.fileExists(atPath: videoURL.path) else {
             throw NSError(
                 domain: "PixOS.MotionPhotoBuilder",
                 code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to read image or video data"]
+                userInfo: [NSLocalizedDescriptionKey: "Failed to read image or video file at specified path"]
             )
         }
 
-        let isJPEG = imageURL.pathExtension.lowercased() == "jpg" || imageURL.pathExtension.lowercased() == "jpeg"
-        let isHEIC = imageURL.pathExtension.lowercased() == "heic"
+        let isJPEG = ["jpg", "jpeg"].contains(imageURL.pathExtension.lowercased())
+        let jpegData: Data
+
+        if isJPEG {
+            guard let rawJpeg = try? Data(contentsOf: imageURL), rawJpeg.count > 4 else {
+                throw NSError(
+                    domain: "PixOS.MotionPhotoBuilder",
+                    code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "Corrupted JPEG image data"]
+                )
+            }
+            jpegData = rawJpeg
+        } else {
+            // Transcode HEIC or other image format to 98% high-fidelity JPEG preserving all EXIF & metadata
+            guard let converted = convertToJPEG(imageURL: imageURL) else {
+                throw NSError(
+                    domain: "PixOS.MotionPhotoBuilder",
+                    code: 3,
+                    userInfo: [NSLocalizedDescriptionKey: "Failed to transcode \(imageURL.pathExtension) image to JPEG"]
+                )
+            }
+            jpegData = converted
+        }
+
+        guard let videoData = try? Data(contentsOf: videoURL), !videoData.isEmpty else {
+            throw NSError(
+                domain: "PixOS.MotionPhotoBuilder",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to read companion video data"]
+            )
+        }
 
         let videoLength = videoData.count
-        let imageMime = isHEIC ? "image/heic" : "image/jpeg"
 
-        // Generate standardized XMP string
+        // Extract presentation timestamp (in microseconds) from companion video
+        let presentationTimestampUs = extractPresentationTimestampUs(videoURL: videoURL)
+
+        // Generate standards-compliant Google Camera XMP string
         let xmpString = """
         <x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.1.0-jc003">
           <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
@@ -32,23 +66,19 @@ public struct MotionPhotoBuilder: Sendable {
               xmlns:GCamera="http://ns.google.com/photos/1.0/camera/"
               Camera:MotionPhoto="1"
               Camera:MotionPhotoVersion="1"
-              Camera:MotionPhotoPresentationTimestampUs="0"
+              Camera:MotionPhotoPresentationTimestampUs="\(presentationTimestampUs)"
               GCamera:MotionPhoto="1"
               GCamera:MicroVideo="1"
               GCamera:MicroVideoVersion="1"
               GCamera:MicroVideoOffset="\(videoLength)"
-              GCamera:MicroVideoPresentationTimestampUs="0">
+              GCamera:MicroVideoPresentationTimestampUs="\(presentationTimestampUs)">
               <Container:Directory>
                 <rdf:Seq>
                   <rdf:li rdf:parseType="Resource">
-                    <Item:Mime>\(imageMime)</Item:Mime>
-                    <Item:Semantic>Primary</Item:Semantic>
-                    <Item:Length>\(imageData.count)</Item:Length>
+                    <Container:Item Item:Mime="image/jpeg" Item:Semantic="Primary" Item:Padding="0"/>
                   </rdf:li>
                   <rdf:li rdf:parseType="Resource">
-                    <Item:Mime>video/mp4</Item:Mime>
-                    <Item:Semantic>MotionPhoto</Item:Semantic>
-                    <Item:Length>\(videoLength)</Item:Length>
+                    <Container:Item Item:Mime="video/mp4" Item:Semantic="MotionPhoto" Item:Length="\(videoLength)" Item:Padding="0"/>
                   </rdf:li>
                 </rdf:Seq>
               </Container:Directory>
@@ -57,18 +87,11 @@ public struct MotionPhotoBuilder: Sendable {
         </x:xmpmeta>
         """
 
-        var finalData = Data()
+        // Embed APP1 XMP into the JPEG data
+        var finalData = embedXMPInJPEG(imageData: jpegData, xmpString: xmpString)
 
-        if isJPEG {
-            // Embed APP1 XMP into JPEG
-            finalData = embedXMPInJPEG(imageData: imageData, xmpString: xmpString)
-            finalData.append(videoData)
-        } else {
-            // For HEIC or other container formats:
-            // Google Photos reads Motion Photo data appended with trailing offset or standard container
-            finalData = imageData
-            finalData.append(videoData)
-        }
+        // Append companion video stream bytes
+        finalData.append(videoData)
 
         try finalData.write(to: outputURL, options: .atomic)
 
@@ -79,6 +102,54 @@ public struct MotionPhotoBuilder: Sendable {
             if let mDate = attrs[.modificationDate] { newAttrs[.modificationDate] = mDate }
             try? FileManager.default.setAttributes(newAttrs, ofItemAtPath: outputURL.path)
         }
+    }
+
+    private static func convertToJPEG(imageURL: URL) -> Data? {
+        guard let source = CGImageSourceCreateWithURL(imageURL as CFURL, nil),
+              CGImageSourceGetCount(source) > 0,
+              let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            return nil
+        }
+
+        let metadata = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] ?? [:]
+        let mutableData = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(mutableData, "public.jpeg" as CFString, 1, nil) else {
+            return nil
+        }
+
+        var options: [CFString: Any] = metadata
+        options[kCGImageDestinationLossyCompressionQuality] = 0.98
+        CGImageDestinationAddImage(destination, cgImage, options as CFDictionary)
+
+        guard CGImageDestinationFinalize(destination) else {
+            return nil
+        }
+
+        return mutableData as Data
+    }
+
+    private static func extractPresentationTimestampUs(videoURL: URL) -> Int64 {
+        let asset = AVURLAsset(url: videoURL)
+        let durationSec = CMTimeGetSeconds(asset.duration)
+
+        // Apple Live Photos typically have ~3.0s total duration, with still image captured around 1.5s
+        var timestampUs: Int64 = durationSec.isFinite && durationSec > 0
+            ? Int64((durationSec / 2.0) * 1_000_000.0)
+            : 1_500_000
+
+        // Inspect QuickTime metadata tracks for still-image-time tag if embedded by iOS Camera
+        for item in asset.metadata {
+            if let key = item.commonKey?.rawValue, key.localizedCaseInsensitiveContains("still") {
+                if let num = item.numberValue {
+                    let extracted = Int64(num.doubleValue * 1_000_000.0)
+                    if extracted > 0 {
+                        timestampUs = extracted
+                    }
+                }
+            }
+        }
+
+        return max(500_000, timestampUs)
     }
 
     private static func embedXMPInJPEG(imageData: Data, xmpString: String) -> Data {

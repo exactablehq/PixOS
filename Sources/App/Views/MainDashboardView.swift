@@ -50,6 +50,9 @@ public struct MainDashboardView: View {
                         // Storage & Sync Visualizer
                         storageCard
 
+                        // Media Category Filters & Overwrite Control
+                        mediaFilterCard
+
                         // Configuration Row
                         configurationCard
 
@@ -682,6 +685,243 @@ public struct MainDashboardView: View {
         )
     }
 
+    // MARK: - Media Category Filter & Overwrite Card
+
+    private var mediaFilterCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            // Header with Overwrite Mode Toggle
+            HStack {
+                HStack(spacing: 8) {
+                    Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(.blue)
+                    Text("Media Category Filters")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("Select which media to transfer")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                // Quick Presets
+                HStack(spacing: 6) {
+                    Button("All Media") {
+                        orchestrator.config.includeLivePhotos = true
+                        orchestrator.config.includePhotos = true
+                        orchestrator.config.includeVideos = true
+                        orchestrator.config.includeScreenshots = true
+                        orchestrator.config.includeScreenRecordings = true
+                        orchestrator.recalculatePendingQueue()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+
+                    Button("Live Photos Only") {
+                        orchestrator.config.includeLivePhotos = true
+                        orchestrator.config.includePhotos = false
+                        orchestrator.config.includeVideos = false
+                        orchestrator.config.includeScreenshots = false
+                        orchestrator.config.includeScreenRecordings = false
+                        orchestrator.recalculatePendingQueue()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+
+                    Button("Photos & Videos") {
+                        orchestrator.config.includeLivePhotos = true
+                        orchestrator.config.includePhotos = true
+                        orchestrator.config.includeVideos = true
+                        orchestrator.config.includeScreenshots = false
+                        orchestrator.config.includeScreenRecordings = false
+                        orchestrator.recalculatePendingQueue()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                }
+
+                Divider().frame(height: 16).padding(.horizontal, 4)
+
+                // Overwrite Mode Toggle
+                Toggle(isOn: Binding(
+                    get: { orchestrator.config.overwriteMode },
+                    set: { val in
+                        orchestrator.config.overwriteMode = val
+                        orchestrator.recalculatePendingQueue()
+                    }
+                )) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(orchestrator.config.overwriteMode ? .orange : .secondary)
+                        Text("Overwrite Mode")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(orchestrator.config.overwriteMode ? .orange : .primary)
+                    }
+                }
+                .toggleStyle(.checkbox)
+                .help("When enabled, re-transfers and overwrites files on Pixel for active filtered categories without losing database history")
+            }
+
+            // Filter Chips Row
+            HStack(spacing: 10) {
+                // Live Photos Chip
+                filterChip(
+                    title: "Live Photos",
+                    icon: "sparkles",
+                    color: .yellow,
+                    count: orchestrator.allDiscoveredMedia.filter { $0.isLivePhoto }.count,
+                    bytes: orchestrator.allDiscoveredMedia.filter { $0.isLivePhoto }.reduce(0) { $0 + $1.fileSize },
+                    isSelected: orchestrator.config.includeLivePhotos
+                ) {
+                    orchestrator.config.includeLivePhotos.toggle()
+                    orchestrator.recalculatePendingQueue()
+                }
+
+                // Standard Photos Chip
+                filterChip(
+                    title: "Standard Photos",
+                    icon: "photo",
+                    color: .blue,
+                    count: orchestrator.allDiscoveredMedia.filter { $0.isStandardPhoto }.count,
+                    bytes: orchestrator.allDiscoveredMedia.filter { $0.isStandardPhoto }.reduce(0) { $0 + $1.fileSize },
+                    isSelected: orchestrator.config.includePhotos
+                ) {
+                    orchestrator.config.includePhotos.toggle()
+                    orchestrator.recalculatePendingQueue()
+                }
+
+                // Videos Chip
+                filterChip(
+                    title: "Videos",
+                    icon: "video.fill",
+                    color: .purple,
+                    count: orchestrator.allDiscoveredMedia.filter { $0.mediaType == .video }.count,
+                    bytes: orchestrator.allDiscoveredMedia.filter { $0.mediaType == .video }.reduce(0) { $0 + $1.fileSize },
+                    isSelected: orchestrator.config.includeVideos
+                ) {
+                    orchestrator.config.includeVideos.toggle()
+                    orchestrator.recalculatePendingQueue()
+                }
+
+                // Screenshots Chip
+                filterChip(
+                    title: "Screenshots",
+                    icon: "camera.viewfinder",
+                    color: .orange,
+                    count: orchestrator.allDiscoveredMedia.filter { $0.mediaType == .screenshot }.count,
+                    bytes: orchestrator.allDiscoveredMedia.filter { $0.mediaType == .screenshot }.reduce(0) { $0 + $1.fileSize },
+                    isSelected: orchestrator.config.includeScreenshots
+                ) {
+                    orchestrator.config.includeScreenshots.toggle()
+                    orchestrator.recalculatePendingQueue()
+                }
+
+                // Screen Recordings Chip
+                filterChip(
+                    title: "Recordings",
+                    icon: "record.circle",
+                    color: .red,
+                    count: orchestrator.allDiscoveredMedia.filter { $0.mediaType == .screenRecording }.count,
+                    bytes: orchestrator.allDiscoveredMedia.filter { $0.mediaType == .screenRecording }.reduce(0) { $0 + $1.fileSize },
+                    isSelected: orchestrator.config.includeScreenRecordings
+                ) {
+                    orchestrator.config.includeScreenRecordings.toggle()
+                    orchestrator.recalculatePendingQueue()
+                }
+            }
+
+            // Sub-options & iCloud Storage Safety Callout
+            HStack(spacing: 16) {
+                // Strip motion option
+                Toggle(isOn: Binding(
+                    get: { orchestrator.config.stripMotionFromPhotos },
+                    set: { val in
+                        orchestrator.config.stripMotionFromPhotos = val
+                        orchestrator.recalculatePendingQueue()
+                    }
+                )) {
+                    Text("Strip Motion from Live Photos (Sync as static JPEG photos)")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                .toggleStyle(.checkbox)
+
+                Spacer()
+
+                // iCloud Safety Hint
+                HStack(spacing: 5) {
+                    Image(systemName: "checkmark.shield.fill")
+                        .foregroundColor(.green)
+                        .font(.system(size: 11))
+                    Text("Pixel backups in /sdcard/DCIM/iPhone/ are permanent. Deleting items from iCloud never deletes from Pixel.")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color.green.opacity(0.08))
+                .cornerRadius(6)
+            }
+        }
+        .padding(14)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.4))
+        .cornerRadius(14)
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(orchestrator.config.overwriteMode ? Color.orange.opacity(0.4) : Color.primary.opacity(0.06), lineWidth: 1)
+        )
+    }
+
+    private func filterChip(
+        title: String,
+        icon: String,
+        color: Color,
+        count: Int,
+        bytes: Int64,
+        isSelected: Bool,
+        onToggle: @escaping () -> Void
+    ) -> some View {
+        Button(action: onToggle) {
+            HStack(spacing: 8) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundColor(isSelected ? color : .secondary.opacity(0.4))
+                    .font(.system(size: 12))
+
+                Image(systemName: icon)
+                    .foregroundColor(isSelected ? color : .secondary)
+                    .font(.system(size: 11))
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                        .foregroundColor(isSelected ? .primary : .secondary)
+
+                    HStack(spacing: 4) {
+                        Text("\(count)")
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        Text("•")
+                            .font(.system(size: 7))
+                            .foregroundColor(.secondary.opacity(0.5))
+                        Text(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))
+                            .font(.system(size: 9, design: .monospaced))
+                    }
+                    .foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isSelected ? color.opacity(0.12) : Color.primary.opacity(0.03))
+            .cornerRadius(10)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(isSelected ? color.opacity(0.35) : Color.primary.opacity(0.05), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
     // MARK: - Configuration Card
 
     private var configurationCard: some View {
@@ -705,7 +945,7 @@ public struct MainDashboardView: View {
             // Concurrency Streams
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 4) {
-                    Text("iCloud Streams")
+                    Text("Parallel Streams (Download & USB)")
                         .font(.caption.bold())
                         .foregroundColor(.secondary)
                     Text("(\(orchestrator.config.concurrentStreams)x)")
@@ -741,7 +981,7 @@ public struct MainDashboardView: View {
                     TextField("Custom", value: $orchestrator.config.concurrentStreams, format: .number)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 58)
-                        .help("Enter any custom number of parallel streams (e.g. 50, 100, 1000)")
+                        .help("Enter custom number of parallel streams (e.g. 8, 16, 50)")
                 }
             }
 
@@ -750,48 +990,14 @@ public struct MainDashboardView: View {
             // Live Photos Toggle
             Toggle(isOn: $orchestrator.config.combineLivePhotos) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Combine Live Photos")
+                    Text("Synthesize Motion Photos")
                         .font(.subheadline.bold())
-                    Text("Synthesize Google Motion Photos")
+                    Text("Combine Apple Live Photos into Google Motion Photos")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
             }
             .toggleStyle(.checkbox)
-
-            Divider()
-
-            // Screenshots Toggle
-            Toggle(isOn: $orchestrator.config.includeScreenshots) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Screenshots")
-                        .font(.subheadline.bold())
-                    Text("Include PNG screenshots")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-            }
-            .toggleStyle(.checkbox)
-            .onChange(of: orchestrator.config.includeScreenshots) {
-                orchestrator.recalculatePendingQueue()
-            }
-
-            Divider()
-
-            // Videos Toggle
-            Toggle(isOn: $orchestrator.config.includeVideos) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Videos")
-                        .font(.subheadline.bold())
-                    Text("Include 4K/HDR videos")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-            }
-            .toggleStyle(.checkbox)
-            .onChange(of: orchestrator.config.includeVideos) {
-                orchestrator.recalculatePendingQueue()
-            }
 
             Spacer()
         }

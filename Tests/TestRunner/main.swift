@@ -64,6 +64,7 @@ do {
     let outputStr = String(data: outputData, encoding: .isoLatin1) ?? ""
     assert(outputStr.contains("Camera:MotionPhoto=\"1\""), "Should contain Camera:MotionPhoto tag")
     assert(outputStr.contains("GCamera:MicroVideoOffset=\"\(videoData.count)\""), "Should contain GCamera:MicroVideoOffset")
+    assert(outputStr.contains("GCamera:MicroVideoPresentationTimestampUs="), "Should contain MicroVideoPresentationTimestampUs")
 
     try? FileManager.default.removeItem(at: tempDir)
     print("\u{001B}[32m✔ PASS:\u{001B}[0m MotionPhotoBuilder tests succeeded!")
