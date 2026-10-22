@@ -180,6 +180,51 @@ public struct SkippedItem: Identifiable, Sendable, Equatable {
     }
 }
 
+public enum TransferStage: String, Sendable, Codable, Equatable {
+    case queued = "Queued"
+    case downloading = "Downloading from iCloud"
+    case synthesizing = "Synthesizing Motion Photo"
+    case transferring = "Transferring to Pixel"
+    case completed = "Completed"
+    case failed = "Failed"
+
+    public var badgeTitle: String {
+        switch self {
+        case .queued: return "QUEUED"
+        case .downloading: return "ICLOUD"
+        case .synthesizing: return "SYNTHESIS"
+        case .transferring: return "USB PUSH"
+        case .completed: return "SYNCED"
+        case .failed: return "FAILED"
+        }
+    }
+}
+
+public struct ActiveProcessingItem: Identifiable, Sendable, Equatable {
+    public let id: String
+    public let item: MediaItem
+    public var stage: TransferStage
+    public var progress: Double // 0.0 to 1.0
+    public var statusDetail: String
+    public var startedAt: Date
+
+    public init(
+        id: String,
+        item: MediaItem,
+        stage: TransferStage = .downloading,
+        progress: Double = 0.0,
+        statusDetail: String = "Downloading from iCloud...",
+        startedAt: Date = Date()
+    ) {
+        self.id = id
+        self.item = item
+        self.stage = stage
+        self.progress = progress
+        self.statusDetail = statusDetail
+        self.startedAt = startedAt
+    }
+}
+
 public struct SyncProgress: Sendable, Equatable {
     public var currentItem: String
     public var currentItemIndex: Int

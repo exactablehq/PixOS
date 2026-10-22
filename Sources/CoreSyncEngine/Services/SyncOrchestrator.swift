@@ -38,6 +38,7 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
     @Published public var skippedFailedItems: [MediaItem] = []
     @Published public var skippedItems: [SkippedItem] = []
     @Published public var autoRetrySkippedAtEnd: Bool = true
+    @Published public var activeProcessingItems: [ActiveProcessingItem] = []
 
     public var connectedIPhone: ConnectedIPhone? {
         if let id = selectedIPhoneId {
@@ -242,6 +243,7 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
     public func cancelSync() {
         isCancelled = true
         state = .cancelled
+        activeProcessingItems.removeAll()
     }
 
     public func startSync() async throws {
@@ -269,6 +271,7 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
         isCancelled = false
         state = .syncing
         lastErrorMessage = nil
+        activeProcessingItems.removeAll()
         recalculatePendingQueue()
 
         let itemsToSync = pendingQueue
@@ -337,9 +340,32 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
             let id = itm.id
             guard prefetchTasks[id] == nil else { return }
             let timeout: TimeInterval = itm.isVideo ? 300.0 : 120.0
+
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                if !self.activeProcessingItems.contains(where: { $0.id == id }) {
+                    self.activeProcessingItems.append(
+                        ActiveProcessingItem(id: id, item: itm, stage: .downloading, progress: 0.05, statusDetail: "Connecting to iCloud...")
+                    )
+                }
+            }
+
             prefetchTasks[id] = Task.detached(priority: .userInitiated) { [weak self] in
                 guard let self = self else { throw PhotoKitError.resourceNotFound }
-                return try await self.photoKitManager.downloadAssetWithRetry(id: id, to: stagingDir, timeout: timeout, maxRetries: 3)
+                return try await self.photoKitManager.downloadAssetWithRetry(
+                    id: id,
+                    to: stagingDir,
+                    timeout: timeout,
+                    maxRetries: 3,
+                    onProgress: { [weak self] p in
+                        Task { @MainActor [weak self] in
+                            if let idx = self?.activeProcessingItems.firstIndex(where: { $0.id == id }) {
+                                self?.activeProcessingItems[idx].progress = max(0.05, p)
+                                self?.activeProcessingItems[idx].statusDetail = "\(Int(p * 100))% downloaded"
+                            }
+                        }
+                    }
+                )
             }
         }
 
@@ -418,15 +444,45 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
 
                     if selectedSourceType == .icloudPhotos {
                         let timeout: TimeInterval = item.isVideo ? 300.0 : 120.0
-                        let task = prefetchTasks.removeValue(forKey: item.id) ?? Task.detached(priority: .userInitiated) { [weak self] in
-                            guard let self = self else { throw PhotoKitError.resourceNotFound }
-                            return try await self.photoKitManager.downloadAssetWithRetry(id: item.id, to: stagingDir, timeout: timeout, maxRetries: 3)
-                        }
+                        let currentId = item.id
+                        let task = prefetchTasks.removeValue(forKey: currentId) ?? {
+                            Task { @MainActor [weak self] in
+                                if let self = self, !self.activeProcessingItems.contains(where: { $0.id == currentId }) {
+                                    self.activeProcessingItems.append(
+                                        ActiveProcessingItem(id: currentId, item: item, stage: .downloading, progress: 0.05, statusDetail: "Downloading from iCloud...")
+                                    )
+                                }
+                            }
+                            return Task.detached(priority: .userInitiated) { [weak self] in
+                                guard let self = self else { throw PhotoKitError.resourceNotFound }
+                                return try await self.photoKitManager.downloadAssetWithRetry(
+                                    id: currentId,
+                                    to: stagingDir,
+                                    timeout: timeout,
+                                    maxRetries: 3,
+                                    onProgress: { [weak self] p in
+                                        Task { @MainActor [weak self] in
+                                            if let idx = self?.activeProcessingItems.firstIndex(where: { $0.id == currentId }) {
+                                                self?.activeProcessingItems[idx].progress = max(0.05, p)
+                                                self?.activeProcessingItems[idx].statusDetail = "\(Int(p * 100))% downloaded"
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        }()
 
                         let res = try await task.value
                         stagedPrimaryURL = res.primaryURL
                         stagedVideoURL = res.companionVideoURL
                     } else {
+                        await MainActor.run {
+                            if !self.activeProcessingItems.contains(where: { $0.id == item.id }) {
+                                self.activeProcessingItems.append(
+                                    ActiveProcessingItem(id: item.id, item: item, stage: .downloading, progress: 0.2, statusDetail: "Reading from iPhone...")
+                                )
+                            }
+                        }
                         stagedPrimaryURL = try await imageCaptureManager.downloadFile(named: item.filename, to: stagingDir)
                         if item.isLivePhoto && config.combineLivePhotos, let companionName = item.companionVideoName {
                             stagedVideoURL = try? await imageCaptureManager.downloadFile(named: companionName, to: stagingDir)
@@ -439,6 +495,11 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
                     if item.isLivePhoto && config.combineLivePhotos, let companionURL = stagedVideoURL {
                         await MainActor.run {
                             self.progress.statusDescription = "Packaging Live Photo for \(item.filename)..."
+                            if let idx = self.activeProcessingItems.firstIndex(where: { $0.id == item.id }) {
+                                self.activeProcessingItems[idx].stage = .synthesizing
+                                self.activeProcessingItems[idx].progress = 0.6
+                                self.activeProcessingItems[idx].statusDetail = "Synthesizing Motion Photo..."
+                            }
                         }
                         let motionURL = stagingDir.appendingPathComponent("MOTION_\(item.filename)")
                         if (try? MotionPhotoBuilder.buildMotionPhoto(imageURL: stagedPrimaryURL, videoURL: companionURL, outputURL: motionURL)) != nil {
@@ -463,6 +524,11 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
                     // Push to Pixel
                     await MainActor.run {
                         self.progress.statusDescription = "Transferring \(item.filename) to Pixel..."
+                        if let idx = self.activeProcessingItems.firstIndex(where: { $0.id == item.id }) {
+                            self.activeProcessingItems[idx].stage = .transferring
+                            self.activeProcessingItems[idx].progress = 0.85
+                            self.activeProcessingItems[idx].statusDetail = "Pushing to Pixel via USB..."
+                        }
                     }
 
                     let remoteDest = "\(targetDir)/\(item.filename)"
@@ -520,6 +586,8 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
                     let bytesDone = overallTransferredBytes
                     let currentItem = item
                     await MainActor.run {
+                        self.activeProcessingItems.removeAll(where: { $0.id == currentItem.id })
+                        self.pendingQueue.removeAll(where: { $0.id == currentItem.id })
                         self.progress.bytesTransferred = bytesDone
                         self.progress.speedBytesPerSecond = rollingSpeed
                         self.progress.estimatedTimeRemainingSeconds = eta
@@ -534,6 +602,7 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
                     let failedItem = item
                     let reason = error.localizedDescription
                     await MainActor.run {
+                        self.activeProcessingItems.removeAll(where: { $0.id == failedItem.id })
                         let skipped = SkippedItem(id: failedItem.id, item: failedItem, reason: reason)
                         self.skippedItems.append(skipped)
                         self.skippedFailedItems.append(failedItem)
@@ -645,6 +714,7 @@ public final class SyncOrchestrator: ObservableObject, @unchecked Sendable {
         }
 
         await MainActor.run {
+            self.activeProcessingItems.removeAll()
             self.recalculatePendingQueue()
             self.state = isCancelled ? .cancelled : .completed
             self.progress.statusDescription = isCancelled ? "Sync cancelled." : "All media successfully transferred!"

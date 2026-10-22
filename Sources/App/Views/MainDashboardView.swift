@@ -800,87 +800,336 @@ public struct MainDashboardView: View {
         .cornerRadius(14)
     }
 
-    // MARK: - Media Queue Card
+    // MARK: - Media Queue & Active Processing Dual Panes
 
     private var mediaQueueCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        HStack(alignment: .top, spacing: 16) {
+            // PANE 1: Currently Processing Items
+            activeProcessingPane
+
+            // PANE 2: Queued Media Items (Scrollable)
+            queuedItemsPane
+        }
+    }
+
+    // MARK: - Pane 1: Active Processing Items
+
+    private var activeProcessingPane: some View {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Pending Media Queue (\(orchestrator.pendingQueue.count))")
-                    .font(.system(size: 14, weight: .semibold))
+                HStack(spacing: 6) {
+                    Image(systemName: "bolt.horizontal.circle.fill")
+                        .foregroundColor(orchestrator.state == .syncing ? .green : .secondary)
+                        .font(.system(size: 14))
+
+                    Text("Currently Processing")
+                        .font(.system(size: 13, weight: .semibold))
+
+                    if !orchestrator.activeProcessingItems.isEmpty {
+                        Text("(\(orchestrator.activeProcessingItems.count))")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(.blue)
+                    }
+                }
 
                 Spacer()
 
                 HStack(spacing: 8) {
+                    Text("\(orchestrator.config.concurrentStreams)x Streams")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.primary.opacity(0.06))
+                        .cornerRadius(4)
+                }
+            }
+
+            // Color Stage Legend
+            HStack(spacing: 12) {
+                HStack(spacing: 4) {
+                    Circle().fill(Color.blue).frame(width: 6, height: 6)
+                    Text("Download").font(.system(size: 9)).foregroundColor(.secondary)
+                }
+                HStack(spacing: 4) {
+                    Circle().fill(Color.orange).frame(width: 6, height: 6)
+                    Text("Synthesis").font(.system(size: 9)).foregroundColor(.secondary)
+                }
+                HStack(spacing: 4) {
+                    Circle().fill(Color.green).frame(width: 6, height: 6)
+                    Text("USB Push").font(.system(size: 9)).foregroundColor(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.bottom, 2)
+
+            Divider().opacity(0.3)
+
+            if orchestrator.activeProcessingItems.isEmpty {
+                VStack(spacing: 8) {
+                    Spacer()
+                    Image(systemName: orchestrator.state == .syncing ? "arrow.triangle.2.circlepath" : "tray")
+                        .font(.system(size: 26))
+                        .foregroundColor(.secondary.opacity(0.6))
+                    Text(orchestrator.state == .syncing ? "Prefetching next assets..." : "No Active Streams")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
+                    Text(orchestrator.state == .syncing ? "Pipelined parallel stream engine active" : "Start sync to activate parallel streams.")
+                        .font(.caption2)
+                        .foregroundColor(.secondary.opacity(0.7))
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        ForEach(orchestrator.activeProcessingItems) { activeItem in
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: iconForMedia(activeItem.item.mediaType))
+                                        .font(.system(size: 11))
+                                        .foregroundColor(activeItem.item.isVideo ? .purple : .blue)
+                                        .frame(width: 14)
+
+                                    Text(activeItem.item.filename)
+                                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                        .lineLimit(1)
+
+                                    Spacer()
+
+                                    // Stage Pill
+                                    Text(activeItem.stage.badgeTitle)
+                                        .font(.system(size: 8, weight: .bold))
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 1.5)
+                                        .background(stageBackgroundColor(for: activeItem.stage))
+                                        .foregroundColor(stageForegroundColor(for: activeItem.stage))
+                                        .cornerRadius(4)
+
+                                    Text(activeItem.item.formattedSize)
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundColor(.secondary)
+                                }
+
+                                // Colored Progress Bar
+                                GeometryReader { geo in
+                                    ZStack(alignment: .leading) {
+                                        RoundedRectangle(cornerRadius: 3)
+                                            .fill(Color.primary.opacity(0.08))
+                                            .frame(height: 5)
+
+                                        RoundedRectangle(cornerRadius: 3)
+                                            .fill(stageGradient(for: activeItem.stage))
+                                            .frame(width: max(8, geo.size.width * CGFloat(activeItem.progress)), height: 5)
+                                            .animation(.linear(duration: 0.2), value: activeItem.progress)
+                                    }
+                                }
+                                .frame(height: 5)
+
+                                HStack {
+                                    Text(activeItem.statusDetail)
+                                        .font(.system(size: 9))
+                                        .foregroundColor(.secondary)
+
+                                    Spacer()
+
+                                    stageIcon(for: activeItem.stage)
+                                        .font(.system(size: 9))
+                                        .foregroundColor(stageForegroundColor(for: activeItem.stage))
+                                }
+                            }
+                            .padding(8)
+                            .background(Color(NSColor.controlBackgroundColor).opacity(0.45))
+                            .cornerRadius(8)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.primary.opacity(0.04), lineWidth: 1)
+                            )
+                        }
+                    }
+                    .padding(.trailing, 2)
+                }
+            }
+        }
+        .padding(14)
+        .frame(height: 290)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.4))
+        .cornerRadius(14)
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Pane 2: Queued Items (Scrollable)
+
+    private var queuedItemsPane: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                HStack(spacing: 6) {
+                    Image(systemName: "list.bullet.rectangle.portrait.fill")
+                        .foregroundColor(.blue)
+                        .font(.system(size: 14))
+
+                    Text("Queued Media")
+                        .font(.system(size: 13, weight: .semibold))
+
+                    Text("(\(orchestrator.pendingQueue.count))")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                HStack(spacing: 8) {
+                    let totalQueuedBytes = orchestrator.pendingQueue.reduce(0) { $0 + $1.fileSize }
+                    Text(ByteCountFormatter.string(fromByteCount: totalQueuedBytes, countStyle: .file))
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.secondary)
+
                     Button(action: { orchestrator.recalculatePendingQueue() }) {
                         Image(systemName: "arrow.clockwise")
-                            .font(.caption)
+                            .font(.caption2)
                     }
                     .buttonStyle(.borderless)
                 }
             }
 
+            Divider().opacity(0.3)
+
             if orchestrator.pendingQueue.isEmpty {
                 VStack(spacing: 8) {
+                    Spacer()
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 32))
+                        .font(.system(size: 28))
                         .foregroundColor(.green)
                     Text("Everything is Synced")
-                        .font(.headline)
-                    Text("No pending photos or videos found on your iPhone.")
-                        .font(.caption)
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("No pending media waiting in queue.")
+                        .font(.caption2)
                         .foregroundColor(.secondary)
+                    Spacer()
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 32)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                VStack(spacing: 6) {
-                    ForEach(orchestrator.pendingQueue.prefix(6)) { item in
-                        HStack(spacing: 12) {
-                            Image(systemName: iconForMedia(item.mediaType))
-                                .foregroundColor(.blue)
-                                .frame(width: 20)
+                ScrollView {
+                    LazyVStack(spacing: 5) {
+                        ForEach(Array(orchestrator.pendingQueue.enumerated()), id: \.element.id) { index, item in
+                            HStack(spacing: 8) {
+                                Text("#\(index + 1)")
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundColor(.secondary.opacity(0.7))
+                                    .frame(width: 28, alignment: .leading)
 
-                            Text(item.filename)
-                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                Image(systemName: iconForMedia(item.mediaType))
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.blue)
+                                    .frame(width: 14)
 
-                            if item.isLivePhoto {
-                                Text("LIVE")
-                                    .font(.system(size: 8, weight: .bold))
-                                    .padding(.horizontal, 4)
-                                    .padding(.vertical, 1)
-                                    .background(Color.yellow.opacity(0.2))
-                                    .foregroundColor(.yellow)
-                                    .cornerRadius(3)
+                                Text(item.filename)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .lineLimit(1)
+
+                                if item.isLivePhoto {
+                                    Text("LIVE")
+                                        .font(.system(size: 7, weight: .bold))
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 1)
+                                        .background(Color.yellow.opacity(0.2))
+                                        .foregroundColor(.yellow)
+                                        .cornerRadius(3)
+                                } else if item.isVideo {
+                                    Text("VIDEO")
+                                        .font(.system(size: 7, weight: .bold))
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 1)
+                                        .background(Color.purple.opacity(0.2))
+                                        .foregroundColor(.purple)
+                                        .cornerRadius(3)
+                                }
+
+                                Spacer()
+
+                                Text(item.formattedSize)
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundColor(.secondary)
                             }
-
-                            Spacer()
-
-                            Text(item.formattedSize)
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
+                            .padding(.vertical, 4)
+                            .padding(.horizontal, 8)
+                            .background(Color.primary.opacity(0.02))
+                            .cornerRadius(6)
                         }
-                        .padding(.vertical, 4)
-                        .padding(.horizontal, 8)
-                        .background(Color.primary.opacity(0.02))
-                        .cornerRadius(6)
                     }
-
-                    if orchestrator.pendingQueue.count > 6 {
-                        Text("+ \(orchestrator.pendingQueue.count - 6) more items in queue")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .padding(.top, 4)
-                    }
+                    .padding(.trailing, 2)
                 }
             }
         }
-        .padding(18)
+        .padding(14)
+        .frame(height: 290)
         .background(Color(NSColor.controlBackgroundColor).opacity(0.4))
-        .cornerRadius(16)
+        .cornerRadius(14)
         .overlay(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: 14)
                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
         )
+    }
+
+    // MARK: - Stage Visual Helpers
+
+    private func stageBackgroundColor(for stage: TransferStage) -> Color {
+        switch stage {
+        case .downloading: return Color.blue.opacity(0.18)
+        case .synthesizing: return Color.orange.opacity(0.18)
+        case .transferring: return Color.green.opacity(0.18)
+        case .completed: return Color.green.opacity(0.15)
+        case .failed: return Color.red.opacity(0.15)
+        case .queued: return Color.secondary.opacity(0.15)
+        }
+    }
+
+    private func stageForegroundColor(for stage: TransferStage) -> Color {
+        switch stage {
+        case .downloading: return .blue
+        case .synthesizing: return .orange
+        case .transferring: return .green
+        case .completed: return .green
+        case .failed: return .red
+        case .queued: return .secondary
+        }
+    }
+
+    private func stageGradient(for stage: TransferStage) -> LinearGradient {
+        switch stage {
+        case .downloading:
+            return LinearGradient(colors: [.blue, .cyan], startPoint: .leading, endPoint: .trailing)
+        case .synthesizing:
+            return LinearGradient(colors: [.yellow, .orange], startPoint: .leading, endPoint: .trailing)
+        case .transferring:
+            return LinearGradient(colors: [.green, .mint], startPoint: .leading, endPoint: .trailing)
+        case .completed:
+            return LinearGradient(colors: [.green, .mint], startPoint: .leading, endPoint: .trailing)
+        case .failed:
+            return LinearGradient(colors: [.red, .pink], startPoint: .leading, endPoint: .trailing)
+        case .queued:
+            return LinearGradient(colors: [.gray, .secondary], startPoint: .leading, endPoint: .trailing)
+        }
+    }
+
+    @ViewBuilder
+    private func stageIcon(for stage: TransferStage) -> some View {
+        switch stage {
+        case .downloading:
+            Image(systemName: "icloud.and.arrow.down.fill")
+        case .synthesizing:
+            Image(systemName: "sparkles")
+        case .transferring:
+            Image(systemName: "bolt.horizontal.fill")
+        case .completed:
+            Image(systemName: "checkmark.circle.fill")
+        case .failed:
+            Image(systemName: "exclamationmark.triangle.fill")
+        case .queued:
+            Image(systemName: "clock")
+        }
     }
 
     private func iconForMedia(_ type: MediaType) -> String {
